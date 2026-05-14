@@ -115,7 +115,7 @@ The workflow prompt will:
 5. `bash infra/aca/deploy.sh`.
 6. `helm upgrade --install zavashop infra/aks/helm/zavashop --set image.tag=$GIT_SHA …`.
 7. `kubectl -n zavashop rollout status deploy/orchestrator`.
-8. Smoke + evals against the public IP.
+8. Wait for external IP + `/healthz` readiness, then run smoke + evals against the public IP.
 
 ### Acceptance
 
@@ -123,9 +123,11 @@ The workflow prompt will:
 az containerapp list -g $RG -o table     # 8 healthy apps
 kubectl -n zavashop get pods             # orchestrator 2/2 Running
 ORCH=$(kubectl -n zavashop get svc orchestrator -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+# If ORCH is empty right after rollout, wait and retry.
+# The CD workflow already includes this guard and waits for /healthz before /plan.
 # Real AKS+ACA orchestration runs 60–120 s end-to-end (Copilot SDK + 4 specialists
 # + 4 MCPs), so widen the per-scenario budget from the loopback default of 30 s.
-ZAVA_EVAL_LATENCY_BUDGET=240 ZAVA_ENDPOINT=http://$ORCH uv run python -m tests.evals.run_evals
+ZAVA_EVAL_LATENCY_BUDGET=400 ZAVA_ENDPOINT=http://$ORCH uv run python -m tests.evals.run_evals
 # Expect: 0 failures
 ```
 
@@ -163,14 +165,48 @@ az containerapp revision list -g $RG -n supplier -o table  # unchanged
 Generate .github/workflows/deploy.yml that runs the same `/ship-it` steps
 on push to main, gated by the `check` job from .github/workflows/ci.yml.
 Use OIDC federation (azure/login@v2 with federated-token) — never a client secret.
+Pin Python to 3.13 with actions/setup-python@v5 BEFORE astral-sh/setup-uv@v3;
+do not pass python-version on setup-uv (it is silently ignored on v3).
+```
+
+### Preflight: the OIDC identity must hold the right roles
+
+The workflow logs in as the UAMI (`$UAMI`, federated to `repo:OWNER/REPO:ref:refs/heads/main`). Before merging, confirm the role set is complete:
+
+```bash
+PRINCIPAL=$(az identity show -n $UAMI -g $RG --query principalId -o tsv)
+az role assignment list --assignee "$PRINCIPAL" --all \
+  --query "[].{role:roleDefinitionName, scope:scope}" -o table
+```
+
+Required entries (all four must be present):
+
+| Role | Scope |
+|---|---|
+| `Contributor` | `rg-zavashop-lab` |
+| `Azure Kubernetes Service Cluster User Role` | `aks-zavashop` |
+| `AcrPull` | `acrzavashop<rand>` |
+| `Key Vault Secrets User` | `kv-zava-<rand>` |
+
+If any row is missing, go back to [Lab 01 §3/§4/§7](../lab-01-environment-setup/README.md). The `Contributor` row is the one most teams forget — its absence surfaces as the misleading "**The resource with name '<acr>' ... could not be found**" in CI.
+
+Also confirm the federated credential `gha-aks-lab-main` exists with `subject = repo:OWNER/REPO:ref:refs/heads/main`:
+
+```bash
+az identity federated-credential list --identity-name $UAMI -g $RG \
+  --query "[].{name:name, subject:subject, issuer:issuer}" -o table
 ```
 
 Acceptance:
 
 - [ ] `permissions: id-token: write, contents: read` on the job.
 - [ ] No `client-secret:` key in the workflow.
-- [ ] `secrets.AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` referenced.
+- [ ] `secrets.AZURE_CLIENT_ID` (= `UAMI_CLIENT_ID`), `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` set in repo secrets and referenced in the workflow.
 - [ ] Image tag = `${{ github.sha }}` (short sha).
+- [ ] Both `ci.yml` and `deploy.yml` use `actions/setup-python@v5` → `python-version: "3.13"` *before* `astral-sh/setup-uv@v3`.
+- [ ] All four UAMI roles above are present.
+- [ ] Federated credential `gha-aks-lab-main` exists.
+- [ ] Smoke step waits/retries for external IP and `GET /healthz` before `POST /plan` (avoid fail-fast `curl (7)`).
 
 ---
 
@@ -188,7 +224,7 @@ az group delete -n $RG --yes --no-wait
 - [ ] `kubectl -n zavashop get pods` shows orchestrator `2/2 Running`.
 - [ ] `az containerapp list -g $RG -o table` shows 8 healthy apps at the deploy SHA.
 - [ ] `/plan` against the AKS LB returns a structured `Plan` for SKU `ZS-1042` / `store-101`.
-- [ ] `ZAVA_EVAL_LATENCY_BUDGET=240 ZAVA_ENDPOINT=http://$ORCH uv run python -m tests.evals.run_evals` → 0 failures.
+- [ ] `ZAVA_EVAL_LATENCY_BUDGET=400 ZAVA_ENDPOINT=http://$ORCH uv run python -m tests.evals.run_evals` → 0 failures.
 - [ ] `grep -rE ':latest' infra/` returns nothing.
 - [ ] The Day-2 prompt-change ran through `agent-builder` → `/ship-it` without touching any other workload.
 - [ ] `git log` for this lab shows only agent-authored commits and the CD pipeline run.

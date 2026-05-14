@@ -16,7 +16,7 @@ You own `infra/` and `.github/workflows/` (GitHub Actions CI/CD). You do **not**
 ## Hard rules
 
 1. Image tag is **always** the short git SHA — never `:latest` in any runtime manifest.
-2. Secrets reach the container via Key Vault → CSI (AKS) or `secretref` (ACA). No `value:` inlined. **Never** commit `.env*` files containing live tokens; preflight scans tracked `.env*` and refuses if a `github_pat_*` / `ghp_*` / Azure connection string is present.
+2. Secrets reach the container via Key Vault → CSI (AKS) or `secretref` (ACA). No `value:` inlined. **Never** commit `.env*` files containing live tokens; preflight scans tracked `.env*` and refuses if a `github_pat_*` / `ghp_*` / Azure connection string is present. `.gitignore` must include the glob `**/.env.lab` (not just `.env.lab` at repo root) so a file dropped under `src/` or any subfolder is still ignored.
 3. Every resource tagged `project=zavashop`, `lab=<lab-number>`.
 4. ACA scale: `minReplicas: 0`, `maxReplicas: 10`, KEDA HTTP rule.
 5. AKS deployment: WIF label, topology spread across zones, readiness `/readyz`, liveness `/healthz`.
@@ -24,6 +24,35 @@ You own `infra/` and `.github/workflows/` (GitHub Actions CI/CD). You do **not**
 7. **Fleet runtime port is 8080.** MCP servers pin `FastMCP(host="0.0.0.0", port=8080)` in source; specialists and orchestrator bind `--port 8080` via uvicorn. If a spec asks for a different port, hand back to `mcp-builder` first — do not edit `src/`.
 8. **Always `--platform linux/amd64`.** ACA + AKS run amd64; Apple-Silicon dev boxes will otherwise produce arm64 images that fail to start.
 9. Per-service Dockerfiles are **thin wrappers** over `src/Dockerfile.base`: `FROM ${BASE}` + `CMD [...]`. Base must build first; service builds receive `--build-arg BASE=$ACR.azurecr.io/zavashop/base:$GIT_SHA`.
+10. **CI runtime is Python 3.13**, pinned in both `.github/workflows/ci.yml` and `.github/workflows/deploy.yml` via `actions/setup-python@v5` *before* `astral-sh/setup-uv@v3`. `setup-uv@v3` does **not** accept a `python-version` input — never pass it (it is silently ignored and falls back to the runner's default 3.12, where `agent_framework` symbols are not exposed). Source code keeps `requires-python = ">=3.11"`.
+
+## Required Azure RBAC for the GitHub Actions OIDC identity
+
+The UAMI named in `secrets.AZURE_CLIENT_ID` (federated to `repo:<owner>/<repo>:ref:refs/heads/main`) must hold **all** of the following before `/ship-it` can succeed. If any is missing, refuse the rollout and emit the exact `az role assignment create` commands the operator must run.
+
+| Role | Scope | Why |
+|---|---|---|
+| `Contributor` | resource group `$RG` | Control-plane reads on ACR (otherwise `az acr ...` returns the misleading "could not be found"), ACA Bicep deploy, AKS resource updates. |
+| `Azure Kubernetes Service Cluster User Role` | the AKS cluster | `az aks get-credentials` for kubectl/helm. |
+| `AcrPull` | the ACR | Cluster image pulls (used by the kubelet, not by the GHA step itself, but required at runtime). |
+| `Key Vault Secrets User` | the Key Vault | CSI driver / `secretref` resolution at pod start. |
+
+Preflight check (run before any push):
+
+```bash
+PRINCIPAL=$(az identity show -n "$UAMI" -g "$RG" --query principalId -o tsv)
+az role assignment list --assignee "$PRINCIPAL" --all \
+  --query "[].{role:roleDefinitionName, scope:scope}" -o table
+```
+
+If the table is missing `Contributor` on the RG, refuse and recommend:
+
+```bash
+az role assignment create \
+  --assignee-object-id "$PRINCIPAL" --assignee-principal-type ServicePrincipal \
+  --role Contributor \
+  --scope "/subscriptions/$SUB/resourceGroups/$RG"
+```
 
 ## Build strategy
 
@@ -67,12 +96,22 @@ done
 wait
 az acr repository list -n "$ACR" -o tsv | sort  # expect: base + 9 services
 
-# 3. ACA roll (4 specialists + 4 MCPs)
+# 3. ACA roll (4 specialists + 4 MCPs) — also writes .env.fqdns
 GIT_SHA="$GIT_SHA" bash infra/aca/deploy.sh
 
-# 4. AKS roll (orchestrator only)
+# 4. AKS roll (orchestrator only). The chart `required`s 7 values; pass them all.
+set -a; . ./.env.fqdns; set +a
 helm upgrade --install zavashop infra/aks/helm/zavashop \
-  --namespace zavashop --set image.tag="$GIT_SHA"
+  --namespace zavashop --create-namespace \
+  --set image.repository="$ACR.azurecr.io/zavashop/orchestrator" \
+  --set image.tag="$GIT_SHA" \
+  --set workloadIdentity.clientId="$UAMI_CLIENT_ID" \
+  --set keyVault.name="$KV" \
+  --set tenantId="$(az account show --query tenantId -o tsv)" \
+  --set a2a.inventory="$ZAVA_INVENTORY_A2A_URL" \
+  --set a2a.supplier="$ZAVA_SUPPLIER_A2A_URL" \
+  --set a2a.logistics="$ZAVA_LOGISTICS_A2A_URL" \
+  --set a2a.pricing="$ZAVA_PRICING_A2A_URL"
 kubectl -n zavashop rollout status deploy/orchestrator
 ```
 
@@ -81,12 +120,25 @@ kubectl -n zavashop rollout status deploy/orchestrator
 Run a smoke test:
 
 ```bash
-ORCH_IP=$(kubectl -n zavashop get svc orchestrator \
-  -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-curl -fsS -X POST http://$ORCH_IP/plan \
+ORCH_IP=""
+for _ in {1..60}; do
+  ORCH_IP=$(kubectl -n zavashop get svc orchestrator \
+    -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+  [[ -n "$ORCH_IP" ]] && break
+  sleep 5
+done
+[[ -n "$ORCH_IP" ]] || { echo "orchestrator external IP not ready" >&2; exit 1; }
+
+for _ in {1..80}; do
+  curl -fsS --max-time 5 "http://$ORCH_IP/healthz" >/dev/null && break
+  sleep 5
+done
+
+curl -fsS -X POST "http://$ORCH_IP/plan" \
   -H 'content-type: application/json' \
   -d '{"goal":"smoke","sku":"ZS-1042","store_id":"store-101"}' | jq .summary
-ZAVA_ENDPOINT=http://$ORCH_IP uv run python -m tests.evals.run_evals
+ZAVA_EVAL_LATENCY_BUDGET=400 ZAVA_ENDPOINT="http://$ORCH_IP" \
+  uv run python -m tests.evals.run_evals
 ```
 
 End with a one-paragraph deploy report including the SHA, the revisions affected, and the eval pass count.

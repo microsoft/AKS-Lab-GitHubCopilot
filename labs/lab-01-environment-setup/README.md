@@ -24,7 +24,7 @@ az version            # ≥ 2.65
 kubectl version --client
 helm version          # ≥ 3.14
 docker version
-python --version      # 3.11+
+python --version      # 3.11+ (CI runs on 3.13 — match it locally to avoid surprises)
 uv --version          # https://docs.astral.sh/uv/
 ```
 
@@ -69,16 +69,30 @@ export UAMI_PRINCIPAL_ID=$(az identity show -n $UAMI -g $RG --query principalId 
 export UAMI_RESOURCE_ID=$(az identity show -n $UAMI -g $RG --query id -o tsv)
 ```
 
-Grant it `AcrPull` on ACR:
+Grant it the four roles it will need (data-plane pulls + control-plane deploys + KV + AKS kubeconfig):
 
 ```bash
 ACR_ID=$(az acr show -n $ACR -g $RG --query id -o tsv)
+RG_ID=$(az group show -n $RG --query id -o tsv)
+
+# 1. Pod-level image pull (data plane)
 az role assignment create \
   --assignee-object-id $UAMI_PRINCIPAL_ID \
   --assignee-principal-type ServicePrincipal \
   --role AcrPull \
   --scope $ACR_ID
+
+# 2. Control-plane access for `az acr build`, ACA Bicep deploy, AKS updates.
+#    NOTE: AcrPull alone is NOT enough — it omits Microsoft.ContainerRegistry/registries/read,
+#    so `az acr show` returns the misleading "could not be found" error in CI.
+az role assignment create \
+  --assignee-object-id $UAMI_PRINCIPAL_ID \
+  --assignee-principal-type ServicePrincipal \
+  --role Contributor \
+  --scope $RG_ID
 ```
+
+> 💡 **Why both?** `AcrPull` is data-plane only (the kubelet uses it). `Contributor` on the RG gives the GitHub Actions OIDC identity the control-plane reads + writes it needs for `az acr build`, `az containerapp ...`, and `az aks ...` during `/ship-it`. The AKS-specific Cluster User role is added in step 4 once the cluster exists.
 
 ## 4. Create the AKS cluster (with OIDC + Workload Identity)
 
@@ -111,6 +125,32 @@ az identity federated-credential create \
   --issuer $AKS_OIDC \
   --subject system:serviceaccount:zavashop:orchestrator-sa \
   --audiences api://AzureADTokenExchange
+```
+
+Federate the UAMI to **GitHub Actions** (`main` branch) so `/ship-it` can OIDC-login without a client secret:
+
+```bash
+# Replace OWNER/REPO with your fork (e.g. kinfey/AKS-Lab).
+export GH_REPO_SLUG="OWNER/REPO"
+
+az identity federated-credential create \
+  --name gha-aks-lab-main \
+  --identity-name $UAMI \
+  --resource-group $RG \
+  --issuer https://token.actions.githubusercontent.com \
+  --subject "repo:${GH_REPO_SLUG}:ref:refs/heads/main" \
+  --audiences api://AzureADTokenExchange
+```
+
+Also grant the UAMI **AKS Cluster User** so the GitHub Actions runner can fetch a kubeconfig via `az aks get-credentials`:
+
+```bash
+AKS_ID=$(az aks show -g $RG -n $AKS --query id -o tsv)
+az role assignment create \
+  --assignee-object-id $UAMI_PRINCIPAL_ID \
+  --assignee-principal-type ServicePrincipal \
+  --role "Azure Kubernetes Service Cluster User Role" \
+  --scope $AKS_ID
 ```
 
 ## 5. Create the Azure Container Apps environment
@@ -208,9 +248,12 @@ In VS Code:
 
 > **From here on, every code change goes through a custom agent** (see `AGENTS.md` §1.1). Pick the agent whose `Owns` slice matches the file you are editing and invoke it with `/<name>`.
 
-## 10. Save environment to `.env.lab`
+## 10. Save environment to `.env.lab` (and gitignore it!)
+
+> ⚠️ `.env.lab` will hold a live `GITHUB_TOKEN`. Treat it like a credential: never commit, never paste into chat. Use a glob so a copy dropped under `src/` or any subfolder is also ignored.
 
 ```bash
+# Always written at the repo root, never under src/.
 cat > .env.lab <<EOF
 LOCATION=$LOCATION
 RG=$RG
@@ -224,7 +267,30 @@ UAMI_CLIENT_ID=$UAMI_CLIENT_ID
 UAMI_RESOURCE_ID=$UAMI_RESOURCE_ID
 AKS_OIDC=$AKS_OIDC
 EOF
-echo ".env.lab" >> .gitignore
+
+# Glob-ignore so any *.env.lab anywhere in the tree is excluded.
+grep -qxF '**/.env.lab' .gitignore || echo '**/.env.lab' >> .gitignore
+grep -qxF '*.env.lab'    .gitignore || echo '*.env.lab'    >> .gitignore
+
+# Refuse to continue if the file was ever tracked.
+if git ls-files --error-unmatch .env.lab src/.env.lab >/dev/null 2>&1; then
+  echo "ERROR: .env.lab is tracked in git history — rotate the token and run \`git rm --cached\`." >&2
+  exit 1
+fi
+```
+
+## 11. Register the three GitHub Actions secrets
+
+The deploy workflow (`/ship-it`, `.github/workflows/deploy.yml`) OIDC-logs in as the UAMI you just federated. Set these once in **GitHub → repo → Settings → Secrets and variables → Actions**:
+
+```bash
+export SUB=$(az account show --query id -o tsv)
+export TENANT=$(az account show --query tenantId -o tsv)
+
+# Using the gh CLI (recommended):
+gh secret set AZURE_SUBSCRIPTION_ID --body "$SUB"            --repo "$GH_REPO_SLUG"
+gh secret set AZURE_TENANT_ID       --body "$TENANT"         --repo "$GH_REPO_SLUG"
+gh secret set AZURE_CLIENT_ID       --body "$UAMI_CLIENT_ID" --repo "$GH_REPO_SLUG"
 ```
 
 ## ✅ Verification
@@ -247,3 +313,6 @@ If all four checks pass, you're ready for [Lab 02 — Agent Creation](../lab-02-
 | `az aks create` hangs > 15 min | Check `az aks show ... --query provisioningState` in another shell; if `Failed`, delete and retry in a different region. |
 | `kubectl` `Unauthorized` | Re-run `az aks get-credentials --overwrite-existing`. |
 | Copilot Chat unable to reach GitHub | Corp proxy — set `HTTPS_PROXY` env var in VS Code's terminal profile. |
+| GitHub Actions: `The resource with name '<acr>' ... could not be found` | The UAMI is missing `Contributor` (or any role that grants `Microsoft.ContainerRegistry/registries/read`) on the RG. `AcrPull` is data-plane only and produces this **misleading "not found"** error. Re-run step 3. |
+| GitHub Actions OIDC: `AADSTS70021` / `no matching federated identity record` | The federated credential `gha-aks-lab-main` is missing or its `subject` doesn't match `repo:OWNER/REPO:ref:refs/heads/main`. Re-run the `az identity federated-credential create` in step 4. |
+| `.env.lab` accidentally committed | Rotate the GitHub PAT *immediately*, then `git rm --cached path/to/.env.lab && git commit && git push`. For full history scrub use `git filter-repo` (destructive — coordinate with collaborators). |
