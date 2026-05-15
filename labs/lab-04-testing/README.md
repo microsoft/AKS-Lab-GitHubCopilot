@@ -2,6 +2,18 @@
 
 > ⏱ ~50 min · You will hand the entire test suite to the **`test-author`** custom mode, and practice the **GitHub Copilot Coding Agent loop** for fixing failing evals.
 
+## ZavaShop story
+
+ZavaShop's supply-chain agents are now talking to each other, but the business cannot afford a regression where the orchestrator confidently recommends adjusting a price for a SKU that doesn't exist. The platform team builds a **test pyramid** that protects each layer: per-agent unit tests with `MockChatClient` so prompts can change safely, per-MCP tool tests so a SQL change in the warehouse cannot break the contract, in-process ASGI integration tests so `/plan` is rehearsed without the cloud, and a small set of **golden eval scenarios** (`S1`–`S5`) that pin the behaviour of the whole fleet. Then they wire `uv run poe check` to GitHub Actions, so every PR Copilot opens is gated by the same quality bar a human PR would be. This lab is where ZavaShop's agents become *trustworthy*.
+
+## Microsoft Learn knowledge for this lab
+
+- [pytest with the Azure SDK](https://learn.microsoft.com/azure/developer/python/sdk/azure-sdk-test-overview) — async-friendly testing patterns used here.
+- [Continuous integration with GitHub Actions](https://learn.microsoft.com/training/modules/github-actions-ci/) — the `ci.yml` quality gate the orchestrator workflow runs under.
+- [Evaluation in Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/) — why the eval harness lives next to the agents, not in a separate repo.
+- [OWASP LLM Top 10 for AI applications](https://learn.microsoft.com/azure/ai-services/openai/concepts/safety-system) — the threat model behind the refusal-rule unit tests.
+- [pyright strict mode for Python](https://learn.microsoft.com/azure/developer/python/sdk/azure-sdk-library-installation) — the contract enforcement that lets Copilot Coding Agent open PRs safely.
+
 ## The pyramid
 
 ```

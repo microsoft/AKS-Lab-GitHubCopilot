@@ -2,6 +2,21 @@
 
 > ⏱ ~45 min · Provision the Azure foundation that the rest of the labs will deploy onto.
 
+## ZavaShop story
+
+**ZavaShop** is a fictional retail chain whose supply chain runs on a multi-agent system: an orchestrator on AKS coordinates four specialist agents (inventory, supplier, logistics, pricing) and four MCP tool servers running on Azure Container Apps. Before any agent code can ship, the platform team has to lay the Azure foundation — a registry to hold images, a cluster to host the orchestrator, an event-driven serverless surface for the specialists, a vault for the GitHub Copilot token, and a single managed identity that ties them together. This lab is that foundation, framed as ZavaShop's "day 0" cloud bootstrap.
+
+## Microsoft Learn knowledge for this lab
+
+- [Azure Kubernetes Service (AKS) overview](https://learn.microsoft.com/azure/aks/intro-kubernetes) — why the orchestrator runs on AKS (long-lived, multi-replica, custom networking).
+- [Azure Container Apps overview](https://learn.microsoft.com/azure/container-apps/overview) — why the 8 specialist + MCP services run on ACA (scale-to-zero, KEDA, no cluster ops).
+- [Azure Container Registry introduction](https://learn.microsoft.com/azure/container-registry/container-registry-intro) — single registry shared by AKS and ACA, attached via `--attach-acr`.
+- [Azure Key Vault overview](https://learn.microsoft.com/azure/key-vault/general/overview) — central store for the `GITHUB-TOKEN` secret consumed by every workload.
+- [Managed identities for Azure resources](https://learn.microsoft.com/entra/identity/managed-identities-azure-resources/overview) — the UAMI is the single identity AKS pods, ACA apps, and GitHub Actions all federate to.
+- [AKS Workload Identity](https://learn.microsoft.com/azure/aks/workload-identity-overview) — how the orchestrator pod borrows the UAMI without any secret in the cluster.
+- [Workload Identity Federation](https://learn.microsoft.com/entra/workload-id/workload-identity-federation) — the mechanism behind both the AKS SA federation and the `gha-aks-lab-main` GitHub federation.
+- [Configure GitHub Actions OIDC with Azure](https://learn.microsoft.com/azure/developer/github/connect-from-azure-openid-connect) — exact subject format for the `repo:OWNER/REPO:ref:refs/heads/main` credential the CD workflow needs.
+
 ## What you build
 
 By the end of this lab you'll have:

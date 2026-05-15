@@ -2,6 +2,18 @@
 
 > ⏱ ~75 min · You will **invoke custom agents** with `/<name>` in Copilot Chat. Each agent is a GitHub Copilot Custom Agent with its own tools, skills, and refusal rules.
 
+## ZavaShop story
+
+With the Azure foundation in place, the ZavaShop platform team turns to the actual product: a fleet of small, role-scoped agents that can answer a real supply-chain question — *"SKU `ZS-1042` is out at store 101, what should we do?"* — without anyone hand-coding the orchestration. Each ZavaShop role becomes one MAF `ChatAgent`: the **inventory** agent reads stock, **supplier** opens POs, **logistics** moves stock between stores, **pricing** adjusts margins, and the **orchestrator** stitches them together. External side-effects (the warehouse DB, the supplier API, the shipping system, the pricing engine) are kept out of the agents and exposed as MCP servers, so the LLM never holds business state. This lab is where ZavaShop's agent code is born — all six implementations come from a Copilot Custom Agent, not hand-typed.
+
+## Microsoft Learn knowledge for this lab
+
+- [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/) — the `ChatAgent`, `Workflow`, and provider model used by every agent in this repo.
+- [Build agents with the GitHub Copilot provider](https://learn.microsoft.com/agent-framework/) — the `GitHubCopilotAgent` + `GitHubCopilotOptions(model="gpt-5.5")` pattern this repo standardizes on.
+- [Model Context Protocol (MCP) on Microsoft Learn](https://learn.microsoft.com/azure/developer/ai/) — why every external tool is exposed as an MCP server rather than an in-agent function.
+- [Customize GitHub Copilot Chat with custom agents](https://docs.github.com/copilot/customizing-copilot/about-customizing-github-copilot-chat-responses) — the `.github/agents/*.agent.md` format you invoke with `/<name>`.
+- [Pydantic v2 models](https://learn.microsoft.com/azure/developer/python/sdk/azure-sdk-overview) — every cross-boundary payload in ZavaShop is a `BaseModel` (request/response contracts, MCP tool args).
+
 ## Before you start
 
 Verify the custom agents are installed:

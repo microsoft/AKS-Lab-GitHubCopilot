@@ -63,6 +63,18 @@ The orchestrator runs as a **long-lived service on AKS**. The specialist agents 
 └─────────┘└─────────┘└──────────┘└────────────┘└──────────┘
 ```
 
+### Story arc across the labs
+
+The five labs are five chapters of one story — ZavaShop going from a blank Azure subscription to a live, observable retail control plane:
+
+| Lab | Chapter | What changes in ZavaShop's world |
+|---|---|---|
+| 01 | **Day 0 — lay the foundation** | The platform team provisions the loading docks (ACR), the shop floor (AKS), the bursty back-of-house (ACA), the safe (Key Vault), and the single staff badge (UAMI) that every worker will wear. |
+| 02 | **Hire the specialists** | Each business role becomes a typed MAF `ChatAgent`. Inventory, Supplier, Logistics, Pricing, and the Orchestrator are born — every external system kept behind an MCP server so the LLM never owns business state. |
+| 03 | **Make them a team** | The orchestrator stops being a one-shot LLM call and becomes a deterministic `Workflow`. Secrets leave `.env` and move into Key Vault. The whole fleet boots locally via Docker Compose so a `/plan` can be debugged end-to-end without the cloud. |
+| 04 | **Earn trust before opening day** | A four-layer test pyramid + five golden eval scenarios (S1–S5) pin the fleet's behaviour. The same `uv run poe check` runs in GitHub Actions, so even Copilot-authored PRs must pass the human bar. |
+| 05 | **Open the store** | `/ship-it` rolls the orchestrator to AKS behind a public LB with Workload Identity + CSI-mounted token, and the 8 specialist/MCP services to ACA with scale-to-zero. GitHub Actions OIDC re-runs the same pipeline on every `main`. |
+
 > ⚠️ Don't confuse the two layers:
 > - **Application agents** (the table above) — the runtime ZavaShop fleet you deploy.
 > - **GitHub Copilot Custom Coding Agents** (`/requirements-analyst` etc.) — the dev-time team that *writes* the application agents for you.
@@ -101,6 +113,52 @@ Workflow prompts in [.github/prompts/](.github/prompts/):
 | 03 | [Multi-Agent Orchestration & Config](./labs/lab-03-orchestration/README.md) | `/requirements-analyst` → `/spec-to-code` → `/orchestrator-architect` | MAF Workflow, A2A wiring, MCP tools, Key Vault hydration, Docker Compose |
 | 04 | [Testing](./labs/lab-04-testing/README.md) | `/test-author` (unit + MCP + integration + evals) → remote **GitHub Copilot Coding Agent** PR loop | Full test pyramid; assign GitHub-side Copilot to a failing-eval issue |
 | 05 | [Deployment & Run](./labs/lab-05-deployment/README.md) | `/deploy-engineer` + `/ship-it` | Helm for AKS, Bicep for ACA, OIDC-federated CD, Day-2 partial roll |
+
+Each lab opens with its own **ZavaShop story** beat and a curated **Microsoft Learn knowledge points** list — read those first to anchor the operations in concepts.
+
+---
+
+## 📚 Microsoft Learn knowledge map
+
+The Learn references are grouped by the concern they answer. Every link is also embedded inside the lab that uses it.
+
+### Platform foundations (Lab 01)
+
+- [Azure Kubernetes Service (AKS) overview](https://learn.microsoft.com/azure/aks/intro-kubernetes)
+- [Azure Container Apps overview](https://learn.microsoft.com/azure/container-apps/overview)
+- [Azure Container Registry introduction](https://learn.microsoft.com/azure/container-registry/container-registry-intro)
+- [Azure Key Vault overview](https://learn.microsoft.com/azure/key-vault/general/overview)
+- [Managed identities for Azure resources](https://learn.microsoft.com/entra/identity/managed-identities-azure-resources/overview)
+
+### Identity & secret-less auth (Labs 01, 03, 05)
+
+- [AKS Workload Identity](https://learn.microsoft.com/azure/aks/workload-identity-overview)
+- [Workload Identity Federation](https://learn.microsoft.com/entra/workload-id/workload-identity-federation)
+- [GitHub Actions OIDC federation with Azure](https://learn.microsoft.com/azure/developer/github/connect-from-azure-openid-connect)
+- [Secrets Store CSI driver on AKS](https://learn.microsoft.com/azure/aks/csi-secrets-store-driver)
+- [`DefaultAzureCredential` for Python](https://learn.microsoft.com/python/api/overview/azure/identity-readme)
+
+### Agents, MCP & the Copilot SDK (Labs 02, 03)
+
+- [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/)
+- [Customize GitHub Copilot Chat with custom agents](https://docs.github.com/copilot/customizing-copilot/about-customizing-github-copilot-chat-responses)
+- [Model Context Protocol on Microsoft Learn](https://learn.microsoft.com/azure/developer/ai/)
+- [Docker Compose for multi-container development](https://learn.microsoft.com/visualstudio/docker/tutorials/multi-container-apps)
+- [Observability for AI apps with OpenTelemetry](https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-overview)
+
+### Testing & quality gate (Lab 04)
+
+- [pytest with the Azure SDK](https://learn.microsoft.com/azure/developer/python/sdk/azure-sdk-test-overview)
+- [Continuous integration with GitHub Actions](https://learn.microsoft.com/training/modules/github-actions-ci/)
+- [Safety system for AI applications](https://learn.microsoft.com/azure/ai-services/openai/concepts/safety-system)
+
+### Deployment (Lab 05)
+
+- [AKS Helm quickstart](https://learn.microsoft.com/azure/aks/quickstart-helm)
+- [Azure Container Apps with Bicep](https://learn.microsoft.com/azure/container-apps/microservices-bicep)
+- [ACR Tasks](https://learn.microsoft.com/azure/container-registry/container-registry-tasks-overview)
+- [KEDA scale rules on Container Apps](https://learn.microsoft.com/azure/container-apps/scale-app)
+- [Bicep `what-if` deployments](https://learn.microsoft.com/azure/azure-resource-manager/bicep/deploy-what-if)
 
 ---
 

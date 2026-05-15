@@ -2,6 +2,18 @@
 
 > ⏱ ~60 min · This lab introduces the **`feature-from-issue` workflow** — the chained-mode loop you'll use for every future change.
 
+## ZavaShop story
+
+ZavaShop's leadership wants a deterministic, auditable answer to a stock-out — not a free-form chat. So the orchestrator stops being a one-shot LLM call and becomes a **MAF `Workflow`**: read stock → check supplier capacity → consider transfer → adjust price → summarize. Each step is a typed contract with a specialist; if a specialist refuses or times out, the workflow can degrade gracefully instead of hallucinating. At the same time the team retires the `GITHUB_TOKEN` from local `.env` files and starts pulling it from Key Vault, and brings the entire fleet up locally via Docker Compose so a developer can debug a /plan run end-to-end without any cloud round trip. This lab is the moment ZavaShop's agents become a *system*.
+
+## Microsoft Learn knowledge for this lab
+
+- [Microsoft Agent Framework Workflows](https://learn.microsoft.com/agent-framework/) — the `Workflow` primitive replacing ad-hoc orchestration calls.
+- [Azure Key Vault secrets — secure hydration patterns](https://learn.microsoft.com/azure/key-vault/secrets/about-secrets) — why secrets are fetched at start-up rather than baked into images.
+- [`DefaultAzureCredential` chain](https://learn.microsoft.com/python/api/overview/azure/identity-readme) — the local-vs-cloud auth flow that makes `az login` work for the dev loop and Workload Identity work in production with the same code path.
+- [Docker Compose for multi-container development](https://learn.microsoft.com/visualstudio/docker/tutorials/multi-container-apps) — the local equivalent of the ACA + AKS topology.
+- [structlog & JSON logs in Azure Monitor](https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-overview) — why every ZavaShop agent emits `agent.name`/`agent.run_id`/`agent.span_id` fields.
+
 ## Goals
 
 1. Promote the orchestrator to a real MAF `Workflow`.

@@ -2,6 +2,21 @@
 
 > ⏱ ~60 min · The **`deploy-engineer`** custom mode owns this entire lab. You drive the rollout through `/ship-it` and verify with smoke + evals against the live AKS endpoint.
 
+## ZavaShop story
+
+ZavaShop's first store goes live next week. The orchestrator needs steady, predictable capacity in front of a public load balancer — that lives on **AKS**, behind Workload Identity and a CSI-mounted token. The four specialists and four MCP servers are bursty (peak hour vs. midnight), so they live on **Azure Container Apps** with scale-to-zero. The whole rollout is captured by a single `/ship-it` workflow that the on-call engineer can trigger from chat, and the same workflow runs again on every push to `main` via GitHub Actions, using OIDC federation to the same UAMI from Lab 01. By the end of this lab, ZavaShop has a real, observable production endpoint that survives a Day-2 prompt change without touching infra.
+
+## Microsoft Learn knowledge for this lab
+
+- [AKS Helm quickstart](https://learn.microsoft.com/azure/aks/quickstart-helm) — the chart pattern under `infra/aks/helm/zavashop/`.
+- [Azure Container Apps with Bicep](https://learn.microsoft.com/azure/container-apps/microservices-bicep) — the parameterized module reused for 8 ACA apps.
+- [ACR Tasks](https://learn.microsoft.com/azure/container-registry/container-registry-tasks-overview) — `az acr build` for daemon-free, native `linux/amd64` builds.
+- [Secrets Store CSI driver on AKS](https://learn.microsoft.com/azure/aks/csi-secrets-store-driver) — how the orchestrator Pod reads `GITHUB-TOKEN` without an environment variable.
+- [AKS Workload Identity](https://learn.microsoft.com/azure/aks/workload-identity-overview) — the SA → UAMI federation that lets `DefaultAzureCredential` work in-pod.
+- [GitHub Actions OIDC federation to Azure](https://learn.microsoft.com/azure/developer/github/connect-from-azure-openid-connect) — the `gha-aks-lab-main` credential the CD workflow uses (no client secret).
+- [KEDA scale rules on Container Apps](https://learn.microsoft.com/azure/container-apps/scale-app) — HTTP scale rule used by the 4 specialists and 4 MCPs.
+- [Bicep `what-if` deployments](https://learn.microsoft.com/azure/azure-resource-manager/bicep/deploy-what-if) — recommended preflight before any `/ship-it` re-run.
+
 ## What you'll produce
 
 | Path | Owner (agent) |
