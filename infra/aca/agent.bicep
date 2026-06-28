@@ -1,6 +1,7 @@
 param name string
 param envId string
 param image string
+param registryServer string
 param uamiId string
 param uamiClientId string
 param copilotModel string = 'gpt-5.5'
@@ -62,6 +63,12 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
         {
           name: secretName
           keyVaultUrl: 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets/GITHUB-TOKEN'
+          identity: uamiId
+        }
+      ]
+      registries: [
+        {
+          server: registryServer
           identity: uamiId
         }
       ]

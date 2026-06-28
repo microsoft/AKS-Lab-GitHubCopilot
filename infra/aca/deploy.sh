@@ -31,6 +31,7 @@ deploy_app() {
     -p name="$name" \
     -p envId="$CAE_ID" \
     -p image="$image" \
+    -p registryServer="$ACR_LOGIN_SERVER" \
     -p uamiId="$UAMI_RESOURCE_ID" \
     -p uamiClientId="$UAMI_CLIENT_ID" \
     -p keyVaultName="$KV" \
