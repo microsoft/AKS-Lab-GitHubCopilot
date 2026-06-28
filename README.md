@@ -1,6 +1,6 @@
 # ZavaShop on AKS + ACA — built by **GitHub Copilot Multi Custom Coding Agents**
 
-![bg](./imgs/bg.jpeg)
+![bg](./imgs/arch.png)
 
 > A hands-on lab series that teaches you to deliver a multi-agent retail supply-chain solution **end-to-end through a team of six GitHub Copilot Custom Coding Agents** — from requirements through deployment.
 > Stack: **Microsoft Agent Framework (MAF)** + **GitHub Copilot SDK** (`gpt-5.5`) + **AKS** + **Azure Container Apps** + **Microsoft Entra ID** + **Microsoft Defender for Cloud**.
