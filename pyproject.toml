@@ -1,0 +1,47 @@
+[project]
+name = "zavashop-stockout-fleet"
+version = "0.1.0"
+description = "Packaged ZavaShop stock-out response fleet for AKS and Azure Container Apps labs."
+requires-python = ">=3.11"
+dependencies = [
+    "agent-framework-core>=1.8.1",
+    "agent-framework-github-copilot>=1.0.0rc1",
+    "fastapi",
+    "httpx",
+    "mcp",
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    "pydantic>=2",
+    "pydantic-settings",
+    "structlog",
+    "uvicorn",
+]
+
+[dependency-groups]
+dev = [
+    "poethepoet",
+    "pyright",
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "ASYNC", "PL", "RUF"]
+ignore = ["PLR0913"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+typeCheckingMode = "strict"
+include = ["src", "tests"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.poe.tasks]
+check = { shell = "ruff check src tests && ruff format --check src tests && pyright src tests && pytest" }

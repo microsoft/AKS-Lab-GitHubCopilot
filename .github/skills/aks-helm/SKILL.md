@@ -38,6 +38,18 @@ a2a:
 resources:
   requests: { cpu: "200m", memory: "256Mi" }
   limits:   { cpu: "1",    memory: "1Gi"  }
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
 ```
 
 ## serviceaccount.yaml
@@ -87,9 +99,17 @@ spec:
 - `metadata.labels.azure.workload.identity/use: "true"` on the **pod template**.
 - `serviceAccountName: orchestrator-sa`.
 - `topologySpreadConstraints` over `topology.kubernetes.io/zone`, `maxSkew: 1`.
+- Non-root pod and container security contexts from `values.yaml`.
 - Mount the CSI volume; project `GITHUB_TOKEN` env via `secretKeyRef` to `github-token/token`.
 - Env: `AZURE_CLIENT_ID`, `ZAVA_COPILOT_MODEL=gpt-5.5`, `ZAVA_COPILOT_TIMEOUT_SECONDS=120`, four `ZAVA_<NAME>_A2A_URL` from `.Values.a2a.*`.
 - Probes: `/healthz`, `/readyz` on port 8080 (fleet runtime port — see deploy-engineer rule 7).
+
+## Landing zone expectations
+
+- The chart assumes the cluster was created with Microsoft Entra ID, Azure RBAC, Azure Policy, Container Insights, and Defender for Cloud in Lab 01.
+- Do not create cluster-scoped RBAC, policy assignments, Log Analytics workspaces, or Defender settings in this Helm chart.
+- Add labels that help Azure Policy and Defender inventory the workload: `app.kubernetes.io/name`, `app.kubernetes.io/part-of=zavashop`, and `azure.workload.identity/use=true` on the pod template.
+- Keep ingress/service exposure explicit. The lab uses `LoadBalancer`; production landing zones should evaluate private ingress, Application Gateway for Containers, firewall egress, and private DNS before exposing the service.
 
 ## Rules
 
@@ -97,3 +117,5 @@ spec:
 - `image.tag` has no default — fail fast if not supplied.
 - Never `value:` a secret. Always `secretKeyRef` or CSI projection.
 - `replicaCount` defaults to 2.
+- Never set privileged containers, host networking, host PID, or host IPC.
+- Never use an image tag default or `latest`.

@@ -3,7 +3,7 @@
 ![bg](./imgs/bg.jpeg)
 
 > A hands-on lab series that teaches you to deliver a multi-agent retail supply-chain solution **end-to-end through a team of six GitHub Copilot Custom Coding Agents** — from requirements through deployment.
-> Stack: **Microsoft Agent Framework (MAF)** + **GitHub Copilot SDK** (`gpt-5.5`) + **AKS** + **Azure Container Apps**.
+> Stack: **Microsoft Agent Framework (MAF)** + **GitHub Copilot SDK** (`gpt-5.5`) + **AKS** + **Azure Container Apps** + **Microsoft Entra ID** + **Microsoft Defender for Cloud**.
 
 ---
 
@@ -32,6 +32,18 @@ The labs teach the **operating model itself** — not just the code. By the end 
 ```
 
 Each agent is a file under [.github/agents/](.github/agents/) (`*.agent.md`). You invoke it by typing `/<agent-name>` in Copilot Chat. Three workflow prompts in [.github/prompts/](.github/prompts/) chain the agents together: `/feature-from-issue`, `/spec-to-code`, `/ship-it`.
+
+## 🚀 Fast Deploy Track
+
+The full lab path teaches every engineering step. For workshops and demos, use the **fast deploy track**: let the workflow prompts drive the custom-agent handoffs, generate the application code and deployment artifacts as one packaged application, then deploy the built images through a single `/ship-it` flow.
+
+Fast path:
+
+1. Complete [Lab 01](./labs/lab-01-environment-setup/README.md) once to create the Azure foundation.
+2. Run `/feature-from-issue` with the ZavaShop stock-out scenario. Follow its handoffs to the owning custom agents instead of manually designing each coding prompt.
+3. Run `/ship-it` to build all service images, deploy ACA specialists/MCP servers, deploy the AKS orchestrator, smoke-test `/healthz`, and run evals.
+
+This reduces the application coding portion from open-ended manual prompting into a guided workflow while preserving the same generated structure under `src/`, `tests/`, and `infra/`. The resulting deployment must still satisfy the AKS landing zone, Entra ID, and Defender for Cloud gates described in Labs 01 and 05.
 
 ---
 
@@ -72,10 +84,10 @@ The five labs are five chapters of one story — ZavaShop going from a blank Azu
 | Lab | Chapter | What changes in ZavaShop's world |
 |---|---|---|
 | 01 | **Day 0 — lay the foundation** | The platform team provisions the loading docks (ACR), the shop floor (AKS), the bursty back-of-house (ACA), the safe (Key Vault), and the single staff badge (UAMI) that every worker will wear. |
-| 02 | **Hire the specialists** | Each business role becomes a typed MAF `ChatAgent`. Inventory, Supplier, Logistics, Pricing, and the Orchestrator are born — every external system kept behind an MCP server so the LLM never owns business state. |
+| 02 | **Hire the specialists** | Each business role becomes a typed MAF `ChatAgent`. Inventory, Supplier, Logistics, Pricing, and the Orchestrator are born — every external system kept behind an MCP server so the LLM never owns business state. Fast-track users can drive this through `/feature-from-issue`. |
 | 03 | **Make them a team** | The orchestrator stops being a one-shot LLM call and becomes a deterministic `Workflow`. Secrets leave `.env` and move into Key Vault. The whole fleet boots locally via Docker Compose so a `/plan` can be debugged end-to-end without the cloud. |
 | 04 | **Earn trust before opening day** | A four-layer test pyramid + five golden eval scenarios (S1–S5) pin the fleet's behaviour. The same `uv run poe check` runs in GitHub Actions, so even Copilot-authored PRs must pass the human bar. |
-| 05 | **Open the store** | `/ship-it` rolls the orchestrator to AKS behind a public LB with Workload Identity + CSI-mounted token, and the 8 specialist/MCP services to ACA with scale-to-zero. GitHub Actions OIDC re-runs the same pipeline on every `main`. |
+| 05 | **Open the store** | `/ship-it` rolls the orchestrator to AKS behind Workload Identity + CSI-mounted token, and the 8 specialist/MCP services to ACA with scale-to-zero. GitHub Actions OIDC re-runs the same pipeline on every `main`, with AKS landing zone, Entra ID, Azure Policy, monitoring, and Defender for Cloud checks. |
 
 > ⚠️ Don't confuse the two layers:
 > - **Application agents** (the table above) — the runtime ZavaShop fleet you deploy.
@@ -110,11 +122,11 @@ Workflow prompts in [.github/prompts/](.github/prompts/):
 
 | # | Lab | Coding agents you'll drive | What you build |
 |---|---|---|---|
-| 01 | [Environment Setup](./labs/lab-01-environment-setup/README.md) | — | Azure subscription, AKS cluster, ACA env, ACR, Key Vault, Workload Identity, then **install the 6 Copilot Custom Agents** |
+| 01 | [Environment Setup](./labs/lab-01-environment-setup/README.md) | — | Azure subscription, landing-zone-aware AKS cluster, ACA env, ACR, Key Vault, Entra ID/RBAC, Defender for Cloud, Workload Identity, then **install the 6 Copilot Custom Agents** |
 | 02 | [Agent Creation](./labs/lab-02-agent-creation/README.md) | `/requirements-analyst` → `/mcp-builder` ×4 → `/agent-builder` ×4 → `/orchestrator-architect` | The five ZavaShop application agents in Python with MAF + Copilot SDK |
 | 03 | [Multi-Agent Orchestration & Config](./labs/lab-03-orchestration/README.md) | `/requirements-analyst` → `/spec-to-code` → `/orchestrator-architect` | MAF Workflow, A2A wiring, MCP tools, Key Vault hydration, Docker Compose |
 | 04 | [Testing](./labs/lab-04-testing/README.md) | `/test-author` (unit + MCP + integration + evals) → remote **GitHub Copilot Coding Agent** PR loop | Full test pyramid; assign GitHub-side Copilot to a failing-eval issue |
-| 05 | [Deployment & Run](./labs/lab-05-deployment/README.md) | `/deploy-engineer` + `/ship-it` | Helm for AKS, Bicep for ACA, OIDC-federated CD, Day-2 partial roll |
+| 05 | [Deployment & Run](./labs/lab-05-deployment/README.md) | `/deploy-engineer` + `/ship-it` | Packaged app images, Helm for AKS, Bicep for ACA, OIDC-federated CD, landing zone security gates, Day-2 partial roll |
 
 Each lab opens with its own **ZavaShop story** beat and a curated **Microsoft Learn knowledge points** list — read those first to anchor the operations in concepts.
 
@@ -126,14 +138,19 @@ The Learn references are grouped by the concern they answer. Every link is also 
 
 ### Platform foundations (Lab 01)
 
+- [AKS landing zone accelerator](https://learn.microsoft.com/azure/cloud-adoption-framework/scenarios/app-platform/aks/landing-zone-accelerator)
+- [AKS architecture guidance](https://learn.microsoft.com/azure/architecture/reference-architectures/containers/aks-start-here)
 - [Azure Kubernetes Service (AKS) overview](https://learn.microsoft.com/azure/aks/intro-kubernetes)
 - [Azure Container Apps overview](https://learn.microsoft.com/azure/container-apps/overview)
 - [Azure Container Registry introduction](https://learn.microsoft.com/azure/container-registry/container-registry-intro)
 - [Azure Key Vault overview](https://learn.microsoft.com/azure/key-vault/general/overview)
 - [Managed identities for Azure resources](https://learn.microsoft.com/entra/identity/managed-identities-azure-resources/overview)
+- [Microsoft Defender for Cloud](https://learn.microsoft.com/azure/defender-for-cloud/defender-for-cloud-introduction)
 
 ### Identity & secret-less auth (Labs 01, 03, 05)
 
+- [Microsoft Entra ID integration with AKS](https://learn.microsoft.com/azure/aks/enable-authentication-microsoft-entra-id)
+- [Use Azure RBAC for Kubernetes Authorization](https://learn.microsoft.com/azure/aks/manage-azure-rbac)
 - [AKS Workload Identity](https://learn.microsoft.com/azure/aks/workload-identity-overview)
 - [Workload Identity Federation](https://learn.microsoft.com/entra/workload-id/workload-identity-federation)
 - [GitHub Actions OIDC federation with Azure](https://learn.microsoft.com/azure/developer/github/connect-from-azure-openid-connect)

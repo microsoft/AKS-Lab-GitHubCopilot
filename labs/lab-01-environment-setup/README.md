@@ -1,21 +1,29 @@
 # Lab 01 — Environment Setup
 
-> ⏱ ~45 min · Provision the Azure foundation that the rest of the labs will deploy onto.
+> ⏱ ~60 min · Provision the Azure foundation that the rest of the labs will deploy onto.
 
 ## ZavaShop story
 
-**ZavaShop** is a fictional retail chain whose supply chain runs on a multi-agent system: an orchestrator on AKS coordinates four specialist agents (inventory, supplier, logistics, pricing) and four MCP tool servers running on Azure Container Apps. Before any agent code can ship, the platform team has to lay the Azure foundation — a registry to hold images, a cluster to host the orchestrator, an event-driven serverless surface for the specialists, a vault for the GitHub Copilot token, and a single managed identity that ties them together. This lab is that foundation, framed as ZavaShop's "day 0" cloud bootstrap.
+**ZavaShop** is a fictional retail chain whose supply chain runs on a multi-agent system: an orchestrator on AKS coordinates four specialist agents (inventory, supplier, logistics, pricing) and four MCP tool servers running on Azure Container Apps. Before any agent code can ship, the platform team has to lay the Azure foundation — a registry to hold images, a cluster to host the orchestrator, an event-driven serverless surface for the specialists, a vault for the GitHub Copilot token, Entra-backed access control, Defender for Cloud coverage, and a single managed identity that ties them together. This lab is that foundation, framed as ZavaShop's "day 0" cloud bootstrap.
+
+This lab follows the AKS landing zone accelerator design areas at workshop scale: resource organization, identity and access management, network topology, security, management/monitoring, and platform automation. The Microsoft Learn AKS landing zone accelerator article is marked for retirement, so use it as a design checklist and pair it with the current Azure Architecture Center AKS guidance when adapting this lab for production.
 
 ## Microsoft Learn knowledge for this lab
 
 - [Azure Kubernetes Service (AKS) overview](https://learn.microsoft.com/azure/aks/intro-kubernetes) — why the orchestrator runs on AKS (long-lived, multi-replica, custom networking).
+- [AKS landing zone accelerator](https://learn.microsoft.com/azure/cloud-adoption-framework/scenarios/app-platform/aks/landing-zone-accelerator) — the design areas this lab maps to: identity, networking, security, governance, monitoring, automation, and resource organization.
+- [AKS architecture guidance](https://learn.microsoft.com/azure/architecture/reference-architectures/containers/aks-start-here) — the current production reference for AKS architecture decisions.
 - [Azure Container Apps overview](https://learn.microsoft.com/azure/container-apps/overview) — why the 8 specialist + MCP services run on ACA (scale-to-zero, KEDA, no cluster ops).
 - [Azure Container Registry introduction](https://learn.microsoft.com/azure/container-registry/container-registry-intro) — single registry shared by AKS and ACA, attached via `--attach-acr`.
 - [Azure Key Vault overview](https://learn.microsoft.com/azure/key-vault/general/overview) — central store for the `GITHUB-TOKEN` secret consumed by every workload.
 - [Managed identities for Azure resources](https://learn.microsoft.com/entra/identity/managed-identities-azure-resources/overview) — the UAMI is the single identity AKS pods, ACA apps, and GitHub Actions all federate to.
+- [Microsoft Entra ID integration with AKS](https://learn.microsoft.com/azure/aks/enable-authentication-microsoft-entra-id) — cluster authentication uses Entra ID instead of local admin credentials.
+- [Use Azure RBAC for Kubernetes Authorization](https://learn.microsoft.com/azure/aks/manage-azure-rbac) — authorization is controlled by Azure role assignments.
 - [AKS Workload Identity](https://learn.microsoft.com/azure/aks/workload-identity-overview) — how the orchestrator pod borrows the UAMI without any secret in the cluster.
 - [Workload Identity Federation](https://learn.microsoft.com/entra/workload-id/workload-identity-federation) — the mechanism behind both the AKS SA federation and the `gha-aks-lab-main` GitHub federation.
 - [Configure GitHub Actions OIDC with Azure](https://learn.microsoft.com/azure/developer/github/connect-from-azure-openid-connect) — exact subject format for the `repo:OWNER/REPO:ref:refs/heads/main` credential the CD workflow needs.
+- [Microsoft Defender for Containers](https://learn.microsoft.com/azure/defender-for-cloud/defender-for-containers-introduction) — threat detection and posture management for AKS, ACR, and Kubernetes workloads.
+- [Azure Monitor Container Insights](https://learn.microsoft.com/azure/azure-monitor/containers/container-insights-overview) — operational telemetry for AKS nodes, pods, and containers.
 
 ## What you build
 
@@ -25,10 +33,13 @@ By the end of this lab you'll have:
 |---|---|
 | Resource group `rg-zavashop-lab` | Container for everything |
 | Azure Container Registry (`acrzavashop<rand>`) | Stores agent images |
-| AKS cluster (`aks-zavashop`) | Runs the orchestrator |
+| AKS cluster (`aks-zavashop`) | Runs the orchestrator with Entra ID, Azure RBAC, Azure Policy, monitoring, and Defender enabled |
 | Azure Container Apps env (`cae-zavashop`) | Runs specialist agents |
 | Key Vault (`kv-zavashop-<rand>`) | Stores the GitHub Copilot token + MCP URLs |
+| Log Analytics workspace (`law-zavashop-<rand>`) | Collects AKS monitoring and Defender signals |
 | User-Assigned Managed Identity (UAMI) | Workload Identity for AKS/ACA |
+| Entra ID security group | Human operator access to AKS through Azure RBAC |
+| Defender for Cloud plans | Container and Key Vault threat protection |
 | Local Python 3.11 env with `uv` | Dev loop |
 | GitHub Copilot signed in in VS Code | Coding assistance |
 
@@ -55,25 +66,36 @@ az account set --subscription "<your-subscription-id>"
 
 # Variables we'll reuse
 export LOCATION="eastus2"
-export RG="rg-zavashop-lab"
+export RG="rg-kinfey-zavashop-lab"
 export RAND="$RANDOM"
 export ACR="acrzavashop${RAND}"
 export AKS="aks-zavashop"
 export CAE="cae-zavashop"
 export KV="kv-zava-${RAND}"
+export LAW="law-zava-${RAND}"
 export UAMI="uami-zavashop"
+export AKS_ADMINS_GROUP="zavashop-aks-admins"
 ```
 
 > 💡 **Copilot tip:** open VS Code in this repo, then open Copilot Chat and type `/explain` against `AGENTS.md` — Copilot will load the house rules into its context for the rest of the session.
 
-## 2. Create the resource group + ACR
+## 2. Create the resource group + ACR + Log Analytics
 
 ```bash
 az group create -n $RG -l $LOCATION \
   --tags project=zavashop lab=01
 
 az acr create -n $ACR -g $RG --sku Standard --admin-enabled false
+
+az monitor log-analytics workspace create \
+  -g $RG -n $LAW -l $LOCATION \
+  --tags project=zavashop lab=01
+
+export LAW_ID=$(az monitor log-analytics workspace show \
+  -g $RG -n $LAW --query id -o tsv)
 ```
+
+> Landing zone note: production environments usually place shared monitoring, DNS, firewall, and policy in platform subscriptions. This lab keeps everything in one resource group so the end-to-end flow is easy to tear down.
 
 ## 3. Create the User-Assigned Managed Identity
 
@@ -109,6 +131,27 @@ az role assignment create \
 
 > 💡 **Why both?** `AcrPull` is data-plane only (the kubelet uses it). `Contributor` on the RG gives the GitHub Actions OIDC identity the control-plane reads + writes it needs for `az acr build`, `az containerapp ...`, and `az aks ...` during `/ship-it`. The AKS-specific Cluster User role is added in step 4 once the cluster exists.
 
+## 3.5. Add Microsoft Entra ID operator access
+
+Create a dedicated Entra ID security group for human AKS administrators. This keeps cluster access auditable and avoids assigning broad subscription roles directly to individual users.
+
+```bash
+az ad group create \
+  --display-name $AKS_ADMINS_GROUP \
+  --mail-nickname $AKS_ADMINS_GROUP
+
+export AKS_ADMINS_GROUP_ID=$(az ad group show \
+  --group $AKS_ADMINS_GROUP --query id -o tsv)
+
+export MY_OID=$(az ad signed-in-user show --query id -o tsv)
+
+az ad group member add \
+  --group $AKS_ADMINS_GROUP_ID \
+  --member-id $MY_OID
+```
+
+> If your tenant blocks group creation, ask an Entra administrator to create the group and give you the object ID. Continue with `export AKS_ADMINS_GROUP_ID="<group-object-id>"`.
+
 ## 4. Create the AKS cluster (with OIDC + Workload Identity)
 
 ```bash
@@ -117,8 +160,13 @@ az aks create \
   --location $LOCATION \
   --node-count 2 \
   --node-vm-size Standard_D4s_v6 \
+  --enable-aad \
+  --enable-azure-rbac \
+  --aad-admin-group-object-ids $AKS_ADMINS_GROUP_ID \
   --enable-oidc-issuer \
   --enable-workload-identity \
+  --enable-addons monitoring,azure-policy \
+  --workspace-resource-id $LAW_ID \
   --network-plugin azure --network-plugin-mode overlay \
   --attach-acr $ACR \
   --generate-ssh-keys \
@@ -166,7 +214,14 @@ az role assignment create \
   --assignee-principal-type ServicePrincipal \
   --role "Azure Kubernetes Service Cluster User Role" \
   --scope $AKS_ID
+
+az role assignment create \
+  --assignee $AKS_ADMINS_GROUP_ID \
+  --role "Azure Kubernetes Service RBAC Cluster Admin" \
+  --scope $AKS_ID
 ```
+
+> Landing zone note: this lab uses Azure CNI Overlay to keep IP consumption low. In production, validate hub-and-spoke connectivity, private endpoints, firewall egress, ingress controller choice, DNS, and private cluster requirements against your platform landing zone.
 
 ## 5. Create the Azure Container Apps environment
 
@@ -231,6 +286,28 @@ az role assignment create \
   --scope $KV_ID
 ```
 
+## 7.5. Enable Defender for Cloud baseline
+
+Enable Defender for Containers and Key Vault at subscription scope, then attach the AKS Defender profile to the Log Analytics workspace. This gives the workshop deployment the same security guardrails expected in an AKS landing zone: runtime threat detection, image and cluster posture signals, and centralized findings in Defender for Cloud.
+
+```bash
+az provider register -n Microsoft.Security --wait
+
+az security pricing create -n Containers --tier Standard
+az security pricing create -n KeyVaults --tier Standard
+
+az aks update \
+  -g $RG -n $AKS \
+  --enable-defender \
+  --defender-config logAnalyticsWorkspaceResourceId=$LAW_ID
+
+az security assessment-metadata list \
+  --query "[?contains(displayName, 'Kubernetes')].displayName" \
+  -o table
+```
+
+If your subscription is governed by central security policy, these settings might already be enforced or blocked from a lab subscription. In that case, capture the existing policy assignment and continue; Lab 05 will still verify that Defender and Azure Policy coverage are visible.
+
 ## 8. Bootstrap the local Python project
 
 ```bash
@@ -265,22 +342,38 @@ In VS Code:
 
 ## 10. Save environment to `.env.lab` (and gitignore it!)
 
-> ⚠️ `.env.lab` will hold a live `GITHUB_TOKEN`. Treat it like a credential: never commit, never paste into chat. Use a glob so a copy dropped under `src/` or any subfolder is also ignored.
+> ⚠️ `.env.lab` holds local deployment metadata, not the live `GITHUB_TOKEN`. Keep the token in your shell only long enough to seed Key Vault, then let Lab 05 project it through CSI. Never commit `.env.lab`, and use a glob so a copy dropped under `src/` or any subfolder is also ignored.
 
 ```bash
 # Always written at the repo root, never under src/.
+export AZURE_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+export AZURE_TENANT_ID=$(az account show --query tenantId -o tsv)
+
 cat > .env.lab <<EOF
 LOCATION=$LOCATION
 RG=$RG
+RAND=$RAND
 ACR=$ACR
 AKS=$AKS
 CAE=$CAE
 COPILOT_MODEL=gpt-5.5
 KV=$KV
+LAW=$LAW
+LAW_ID=$LAW_ID
 UAMI=$UAMI
 UAMI_CLIENT_ID=$UAMI_CLIENT_ID
+UAMI_PRINCIPAL_ID=$UAMI_PRINCIPAL_ID
 UAMI_RESOURCE_ID=$UAMI_RESOURCE_ID
 AKS_OIDC=$AKS_OIDC
+AKS_ADMINS_GROUP=$AKS_ADMINS_GROUP
+AKS_ADMINS_GROUP_ID=$AKS_ADMINS_GROUP_ID
+AKS_ID=$AKS_ID
+KV_ID=$KV_ID
+ACR_ID=$ACR_ID
+RG_ID=$RG_ID
+AZURE_SUBSCRIPTION_ID=$AZURE_SUBSCRIPTION_ID
+AZURE_TENANT_ID=$AZURE_TENANT_ID
+GH_REPO_SLUG=$GH_REPO_SLUG
 EOF
 
 # Glob-ignore so any *.env.lab anywhere in the tree is excluded.
@@ -313,11 +406,24 @@ gh secret set AZURE_CLIENT_ID       --body "$UAMI_CLIENT_ID" --repo "$GH_REPO_SL
 ```bash
 kubectl get nodes -o wide
 az containerapp env show -n $CAE -g $RG --query properties.provisioningState   # Succeeded
+az aks show -g $RG -n $AKS --query aadProfile -o yaml
+
+az aks show -g $RG -n $AKS \
+  --query addonProfiles.azurepolicy.enabled -o tsv
+
+az aks show -g $RG -n $AKS \
+  --query securityProfile.defender.securityMonitoring.enabled -o tsv
+
+az security pricing show -n Containers \
+  --query pricingTier -o tsv                 # Standard
+
+az security pricing show -n KeyVaults \
+  --query pricingTier -o tsv                 # Standard
 uv run python -c "import agent_framework; print(agent_framework.__version__)"
 uv run python -c "from agent_framework.github import GitHubCopilotAgent; print('copilot sdk ok')"
 ```
 
-If all four checks pass, you're ready for [Lab 02 — Agent Creation](../lab-02-agent-creation/README.md).
+If these checks pass, you're ready for [Lab 02 — Agent Creation](../lab-02-agent-creation/README.md).
 
 ## Troubleshooting
 

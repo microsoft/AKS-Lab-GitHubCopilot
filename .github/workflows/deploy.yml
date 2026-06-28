@@ -1,0 +1,165 @@
+name: deploy
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Ship ZavaShop
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      PYTHON_VERSION: "3.13"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Load lab environment
+        shell: bash
+        run: |
+          cat >> "$GITHUB_ENV" <<EOF
+          RG=${{ vars.AZURE_RESOURCE_GROUP }}
+          ACR=${{ vars.AZURE_CONTAINER_REGISTRY }}
+          AKS=${{ vars.AKS_CLUSTER }}
+          CAE=${{ vars.CONTAINER_APPS_ENV }}
+          KV=${{ vars.KEY_VAULT_NAME }}
+          UAMI=${{ vars.UAMI_NAME }}
+          UAMI_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}
+          UAMI_RESOURCE_ID=${{ vars.UAMI_RESOURCE_ID }}
+          AZURE_TENANT_ID=${{ secrets.AZURE_TENANT_ID }}
+          GIT_SHA=${GITHUB_SHA::7}
+          EOF
+
+      - name: Quality gate
+        shell: bash
+        run: |
+          uv run poe check
+          latest_pattern=':'
+          latest_pattern="${latest_pattern}latest"
+          if grep -rE "$latest_pattern" infra .github/workflows; then
+            echo 'Refusing deploy because a latest image tag appears in deployment artifacts.'
+            exit 1
+          fi
+
+      - name: Landing zone preflight
+        shell: bash
+        run: |
+          aad_json=$(az aks show -g "$RG" -n "$AKS" --query aadProfile -o json)
+          if [[ "$aad_json" == "null" ]]; then
+            echo 'AKS aadProfile is missing.'
+            exit 1
+          fi
+
+          policy_enabled=$(az aks show -g "$RG" -n "$AKS" \
+            --query addonProfiles.azurepolicy.enabled -o tsv)
+          [[ "$policy_enabled" == "true" ]]
+
+          defender_enabled=$(az aks show -g "$RG" -n "$AKS" \
+            --query securityProfile.defender.securityMonitoring.enabled -o tsv)
+          [[ "$defender_enabled" == "true" ]]
+
+          containers_tier=$(az security pricing show -n Containers \
+            --query pricingTier -o tsv)
+          [[ "$containers_tier" == "Standard" ]]
+
+          keyvaults_tier=$(az security pricing show -n KeyVaults \
+            --query pricingTier -o tsv)
+          [[ "$keyvaults_tier" == "Standard" ]]
+
+      - name: Build and push images
+        shell: bash
+        run: |
+          ACR_LOGIN_SERVER="$ACR.azurecr.io"
+          az acr build -r "$ACR" \
+            -t "zavashop/base:$GIT_SHA" \
+            -f src/Dockerfile.base .
+
+          for service in orchestrator inventory supplier logistics pricing; do
+            dockerfile="src/agents/$service/Dockerfile"
+            if [[ -f "$dockerfile" ]]; then
+              az acr build -r "$ACR" \
+                -t "zavashop/$service:$GIT_SHA" \
+                -f "$dockerfile" .
+            fi
+          done
+
+          for service in inventory supplier shipping pricing; do
+            az acr build -r "$ACR" \
+              -t "zavashop/$service-mcp:$GIT_SHA" \
+              -f "src/mcp_servers/$service/Dockerfile" .
+          done
+
+      - name: Deploy ACA services
+        shell: bash
+        run: |
+          bash infra/aca/deploy.sh
+
+      - name: Deploy AKS orchestrator
+        shell: bash
+        run: |
+          source .env.fqdns
+          az aks get-credentials -g "$RG" -n "$AKS" --overwrite-existing
+          kubectl create namespace zavashop --dry-run=client -o yaml | kubectl apply -f -
+          helm upgrade --install zavashop infra/aks/helm/zavashop \
+            -n zavashop \
+            --set image.repository="$ACR.azurecr.io/zavashop/orchestrator" \
+            --set image.tag="$GIT_SHA" \
+            --set workloadIdentity.clientId="$UAMI_CLIENT_ID" \
+            --set keyVault.name="$KV" \
+            --set tenantId="$AZURE_TENANT_ID" \
+            --set a2a.inventory="$ZAVA_INVENTORY_URL" \
+            --set a2a.supplier="$ZAVA_SUPPLIER_URL" \
+            --set a2a.logistics="$ZAVA_LOGISTICS_URL" \
+            --set a2a.pricing="$ZAVA_PRICING_URL"
+          kubectl -n zavashop rollout status deploy/orchestrator --timeout=300s
+
+      - name: Smoke and evals
+        shell: bash
+        run: |
+          for _ in {1..60}; do
+            ORCH=$(kubectl -n zavashop get svc orchestrator \
+              -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+            if [[ -n "$ORCH" ]]; then
+              break
+            fi
+            sleep 10
+          done
+          test -n "$ORCH"
+
+          for _ in {1..60}; do
+            if curl -fsS "http://$ORCH/healthz"; then
+              break
+            fi
+            sleep 5
+          done
+
+          curl -fsS -X POST "http://$ORCH/plan" \
+            -H 'content-type: application/json' \
+            -d '{"goal":"Store 101 will stock out of SKU ZS-1042 by Friday.","sku":"ZS-1042","store_id":"store-101"}'
+
+          ZAVA_EVAL_LATENCY_BUDGET=400 \
+            ZAVA_ENDPOINT="http://$ORCH" \
+            uv run python -m tests.evals.run_evals

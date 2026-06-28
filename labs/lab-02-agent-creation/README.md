@@ -16,6 +16,19 @@ With the Azure foundation in place, the ZavaShop platform team turns to the actu
 
 ## Before you start
 
+### Fast path for quick deployment
+
+If your goal is to deploy a working demo quickly, run the workflow prompt instead of manually designing every implementation prompt:
+
+```text
+/feature-from-issue
+Build the ZavaShop stock-out response app as a packaged deployable fleet:
+five MAF agents, four MCP servers, tests, Docker packaging, and a handoff to
+/ship-it. Target AKS for the orchestrator and ACA for specialists/MCPs.
+```
+
+Follow the handoffs it gives you to the owning custom agents. Use the detailed steps below when you want to teach or inspect each generated component. Both paths must produce the same deployable shape under `src/`, `tests/`, and `infra/`.
+
 Verify the custom agents are installed:
 
 ```bash

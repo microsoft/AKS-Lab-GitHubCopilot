@@ -1,0 +1,46 @@
+replicaCount: 2
+
+image:
+  repository: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+
+workloadIdentity:
+  clientId: ""
+
+keyVault:
+  name: ""
+
+tenantId: ""
+
+a2a:
+  inventory: ""
+  supplier: ""
+  logistics: ""
+  pricing: ""
+
+service:
+  type: LoadBalancer
+  port: 80
+  targetPort: 8000
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL

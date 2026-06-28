@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orchestrator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "zavashop.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: orchestrator
+      app.kubernetes.io/part-of: zavashop
+  template:
+    metadata:
+      labels:
+        {{- include "zavashop.labels" . | nindent 8 }}
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: orchestrator-sa
+      automountServiceAccountToken: true
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: orchestrator
+              app.kubernetes.io/part-of: zavashop
+      volumes:
+        - name: github-token
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: zavashop-github-token
+      containers:
+        - name: orchestrator
+          image: {{ printf "%s:%s" (required "image.repository is required" .Values.image.repository) (required "image.tag is required" .Values.image.tag) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - containerPort: {{ .Values.service.targetPort }}
+              name: http
+          env:
+            - name: AZURE_CLIENT_ID
+              value: {{ required "workloadIdentity.clientId is required" .Values.workloadIdentity.clientId | quote }}
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: github-token
+                  key: token
+            - name: ZAVA_COPILOT_MODEL
+              value: "gpt-5.5"
+            - name: ZAVA_COPILOT_TIMEOUT_SECONDS
+              value: "120"
+            - name: ZAVA_INVENTORY_A2A_URL
+              value: {{ required "a2a.inventory is required" .Values.a2a.inventory | quote }}
+            - name: ZAVA_SUPPLIER_A2A_URL
+              value: {{ required "a2a.supplier is required" .Values.a2a.supplier | quote }}
+            - name: ZAVA_LOGISTICS_A2A_URL
+              value: {{ required "a2a.logistics is required" .Values.a2a.logistics | quote }}
+            - name: ZAVA_PRICING_A2A_URL
+              value: {{ required "a2a.pricing is required" .Values.a2a.pricing | quote }}
+          volumeMounts:
+            - name: github-token
+              mountPath: /mnt/secrets-store
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
