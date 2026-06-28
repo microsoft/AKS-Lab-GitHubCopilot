@@ -13,7 +13,7 @@ source .env.lab
 : "${UAMI_RESOURCE_ID:?missing UAMI_RESOURCE_ID}"
 : "${UAMI_CLIENT_ID:?missing UAMI_CLIENT_ID}"
 
-GIT_SHA="${GIT_SHA:-$(git rev-parse --short HEAD)}"
+GIT_SHA="${DEPLOY_SHA:-${GIT_SHA:-$(git rev-parse --short HEAD)}}"
 ACR_LOGIN_SERVER="${ACR}.azurecr.io"
 CAE_ID="$(az containerapp env show -g "$RG" -n "$CAE" --query id -o tsv)"
 ENV_FILE=".env.fqdns"
@@ -37,7 +37,8 @@ deploy_app() {
     -p keyVaultName="$KV" \
     -p targetPort="$target_port" \
     -p mcpEndpoints="$mcp_json" \
-    -p exposeIngress=false \
+    -p exposeIngress=true \
+    -p minReplicas=1 \
     -o none
 
   local fqdn

@@ -21,6 +21,13 @@ async def healthz(_request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
+@mcp.custom_route("/readyz", methods=["GET"])
+async def readyz(_request: Request) -> JSONResponse:
+    """Return readiness for ACA ingress probes."""
+
+    return JSONResponse({"status": "ready", "name": "inventory-mcp"})
+
+
 @mcp.tool()
 async def check_stock(query: StockQuery) -> StockReport:
     """Check current stock and stock-out risk for one SKU at one store.

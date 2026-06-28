@@ -21,6 +21,13 @@ async def healthz(_request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
+@mcp.custom_route("/readyz", methods=["GET"])
+async def readyz(_request: Request) -> JSONResponse:
+    """Return readiness for ACA ingress probes."""
+
+    return JSONResponse({"status": "ready", "name": "shipping-mcp"})
+
+
 @mcp.tool()
 async def quote_shipment(request: ShipmentQuoteRequest) -> ShipmentQuote:
     """Quote shipment cost and ETA for one purchase order.

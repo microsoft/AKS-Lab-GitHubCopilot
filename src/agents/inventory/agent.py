@@ -5,9 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from agent_framework.github import GitHubCopilotAgent, GitHubCopilotOptions
-from copilot.generated.rpc import PermissionDecisionApproved
+from copilot.generated.rpc import PermissionDecisionApproveOnce
 from copilot.session import PermissionRequestResult
 
+from src.shared.copilot import build_copilot_client
 from src.shared.settings import Settings
 
 from .prompts import SYSTEM_PROMPT
@@ -15,7 +16,7 @@ from .tools import TOOLS
 
 
 def _approve_all(_request: object, _context: dict[str, str]) -> PermissionRequestResult:
-    return PermissionDecisionApproved()
+    return PermissionDecisionApproveOnce()
 
 
 @dataclass
@@ -36,6 +37,7 @@ class _RunnableAgent:
 
 async def build_agent(settings: Settings) -> _RunnableAgent:
     agent = GitHubCopilotAgent(
+        client=build_copilot_client(),
         instructions=SYSTEM_PROMPT,
         name="inventory",
         description="ZavaShop inventory specialist for stock-risk interpretation.",
@@ -49,7 +51,7 @@ async def build_agent(settings: Settings) -> _RunnableAgent:
                     "type": "http",
                     "url": settings.inventory_mcp_url,
                     "tools": ["*"],
-                    "timeout": int(settings.copilot_timeout_seconds),
+                    "timeout": int(settings.copilot_timeout_seconds * 1000),
                 },
             },
         ),

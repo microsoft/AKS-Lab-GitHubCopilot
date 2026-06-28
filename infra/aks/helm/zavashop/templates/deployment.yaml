@@ -30,6 +30,8 @@ spec:
               app.kubernetes.io/name: orchestrator
               app.kubernetes.io/part-of: zavashop
       volumes:
+        - name: copilot-cache
+          emptyDir: {}
         - name: github-token
           csi:
             driver: secrets-store.csi.k8s.io
@@ -40,6 +42,11 @@ spec:
         - name: orchestrator
           image: {{ printf "%s:%s" (required "image.repository is required" .Values.image.repository) (required "image.tag is required" .Values.image.tag) | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - export GITHUB_TOKEN="$(cat /mnt/secrets-store/GITHUB-TOKEN)" && exec uvicorn src.agents.orchestrator.server:app --host 0.0.0.0 --port 8000
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           ports:
@@ -48,11 +55,6 @@ spec:
           env:
             - name: AZURE_CLIENT_ID
               value: {{ required "workloadIdentity.clientId is required" .Values.workloadIdentity.clientId | quote }}
-            - name: GITHUB_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: github-token
-                  key: token
             - name: ZAVA_COPILOT_MODEL
               value: "gpt-5.5"
             - name: ZAVA_COPILOT_TIMEOUT_SECONDS
@@ -66,6 +68,8 @@ spec:
             - name: ZAVA_PRICING_A2A_URL
               value: {{ required "a2a.pricing is required" .Values.a2a.pricing | quote }}
           volumeMounts:
+            - name: copilot-cache
+              mountPath: /home/zava/.cache
             - name: github-token
               mountPath: /mnt/secrets-store
               readOnly: true

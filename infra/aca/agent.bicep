@@ -9,6 +9,7 @@ param mcpEndpoints object = {}
 param exposeIngress bool = false
 param keyVaultName string
 param targetPort int = 8000
+param minReplicas int = 1
 param location string = resourceGroup().location
 
 var secretName = 'github-token'
@@ -104,7 +105,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
         }
       ]
       scale: {
-        minReplicas: 0
+        minReplicas: minReplicas
         maxReplicas: 10
         rules: [
           {

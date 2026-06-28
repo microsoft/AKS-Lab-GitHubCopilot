@@ -21,6 +21,13 @@ async def healthz(_request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
+@mcp.custom_route("/readyz", methods=["GET"])
+async def readyz(_request: Request) -> JSONResponse:
+    """Return readiness for ACA ingress probes."""
+
+    return JSONResponse({"status": "ready", "name": "pricing-mcp"})
+
+
 @mcp.tool()
 async def recommend_price(query: PricingQuery) -> PriceRecommendation:
     """Recommend a price for one SKU at one store.

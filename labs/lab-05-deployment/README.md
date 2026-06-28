@@ -178,7 +178,7 @@ The workflow prompt will:
 3. Compute the changed-services set (on first run: all of them).
 4. Build + push only changed images.
 5. Re-run the landing zone preflight checks for Entra ID, Azure Policy, monitoring, and Defender.
-6. `bash infra/aca/deploy.sh`.
+6. `DEPLOY_SHA=$GIT_SHA bash infra/aca/deploy.sh`.
 7. `helm upgrade --install zavashop infra/aks/helm/zavashop --set image.tag=$GIT_SHA …`.
 8. `kubectl -n zavashop rollout status deploy/orchestrator`.
 9. Wait for external IP + `/healthz` readiness, then run smoke + evals against the public IP.
