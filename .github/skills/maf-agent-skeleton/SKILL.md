@@ -24,15 +24,17 @@ from dataclasses import dataclass
 
 from agent_framework import AgentResponse
 from agent_framework.github import GitHubCopilotAgent, GitHubCopilotOptions
+from copilot.generated.rpc import PermissionDecisionApproveOnce
 from copilot.session import PermissionRequestResult
 
+from src.shared.copilot import build_copilot_client
 from src.shared.settings import Settings
 from .prompts import SYSTEM_PROMPT
 from .tools import TOOLS  # usually empty: list[FunctionTool] = []
 
 
 def _approve_all(_req: object, _ctx: dict[str, str]) -> PermissionRequestResult:
-    return PermissionRequestResult(kind="approved")
+    return PermissionDecisionApproveOnce()
 
 
 @dataclass(frozen=True)
@@ -47,6 +49,7 @@ class _RunnableAgent:
 async def build_agent(settings: Settings) -> _RunnableAgent:
     agent = GitHubCopilotAgent(
         instructions=SYSTEM_PROMPT,
+        client=build_copilot_client(),
         name="<name>",
         description="ZavaShop <name> specialist (...).",
         tools=list(TOOLS),
@@ -59,7 +62,7 @@ async def build_agent(settings: Settings) -> _RunnableAgent:
                     "type": "http",
                     "url": settings.<which>_mcp_url,
                     "tools": ["*"],
-                    "timeout": int(settings.copilot_timeout_seconds),
+                    "timeout": int(settings.copilot_timeout_seconds * 1000),
                 },
             },
         ),
@@ -72,7 +75,9 @@ Rules:
 - One `build_agent` per agent. Async. Returns the `_RunnableAgent` adapter — `make_app` only needs `.run(message)`.
 - Settings is the only configuration source. No env reads inside `agent.py`.
 - `GitHubCopilotAgent` + `GitHubCopilotOptions` is the only allowed chat surface. **No** `GitHubCopilotChatClient`, **no** `ChatAgent(client=...)`, **no** `MCPStreamableHTTPTool` — those do not exist in agent-framework 1.3.x.
-- `on_permission_request=_approve_all` is mandatory; without it every tool call silently denies and the LLM hallucinates "all specialists rejected".
+- `client=build_copilot_client()` is mandatory so `GITHUB_TOKEN` is honored in local, AKS, and ACA runtimes.
+- `on_permission_request=_approve_all` returning `PermissionDecisionApproveOnce()` is mandatory; without it every tool call silently denies and the LLM hallucinates "all specialists rejected".
+- `mcp_servers[*].timeout` is milliseconds; use `int(settings.copilot_timeout_seconds * 1000)`.
 - For the orchestrator (no MCP), drop `mcp_servers` and put four `@tool`-decorated `async def ask_<peer>(goal: str)` functions in `agent.py` itself, each calling `A2AClient.invoke(...)`. Tool signatures must be flat scalars, never Pydantic models (the SDK passes a raw dict).
 
 ## `prompts.py` template

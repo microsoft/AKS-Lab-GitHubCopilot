@@ -6,19 +6,23 @@
 
 ```python
 from agent_framework.github import GitHubCopilotAgent, GitHubCopilotOptions
+from copilot.generated.rpc import PermissionDecisionApproveOnce
 from copilot.session import PermissionRequestResult
+
+from src.shared.copilot import build_copilot_client
 ```
 
 ## The one builder shape
 
 ```python
 def _approve_all(_request: object, _context: dict[str, str]) -> PermissionRequestResult:
-    return PermissionRequestResult(kind="approved")
+    return PermissionDecisionApproveOnce()
 
 
 async def build_agent(settings: Settings) -> _RunnableAgent:
     agent = GitHubCopilotAgent(
         instructions=SYSTEM_PROMPT,
+        client=build_copilot_client(),
         name="<name>",
         description="...",
         tools=list(TOOLS),                       # local @tool functions, NEVER MCP
@@ -31,7 +35,7 @@ async def build_agent(settings: Settings) -> _RunnableAgent:
                     "type": "http",
                     "url": settings.<which>_mcp_url,
                     "tools": ["*"],
-                    "timeout": int(settings.copilot_timeout_seconds),
+                    "timeout": int(settings.copilot_timeout_seconds * 1000),
                 },
             },
         ),
@@ -43,7 +47,7 @@ async def build_agent(settings: Settings) -> _RunnableAgent:
 
 ## Permissions (do NOT skip)
 
-The Copilot SDK runs every tool call through a permission gate. Without a handler, every call returns:
+The Copilot SDK runs every tool call through a permission gate. The handler must return `PermissionDecisionApproveOnce()`. Without a handler, every call returns:
 
 > `Permission denied and could not request permission from user`
 
@@ -74,7 +78,7 @@ MCP is configured **inside `GitHubCopilotOptions(mcp_servers={...})`**, not via 
 
 ## Authentication
 
-- Local dev: fine-grained PAT in `GITHUB_TOKEN`. `docker-compose.yml` fails fast (`${GITHUB_TOKEN:?...}`) if it's not exported — required even for `docker compose ps` / `down`.
+- Local dev: fine-grained PAT in `GITHUB_TOKEN`. `build_copilot_client()` passes it explicitly to `CopilotClient(github_token=..., use_logged_in_user=False)`. `docker-compose.yml` fails fast (`${GITHUB_TOKEN:?...}`) if it's not exported — required even for `docker compose ps` / `down`.
 - AKS: Key Vault → Secrets Store CSI → `GITHUB_TOKEN` env. Pod SA is federated to a UAMI (Workload Identity).
 - ACA: Key Vault `secretref` → `GITHUB_TOKEN`. Container app uses a UAMI.
 
@@ -85,7 +89,7 @@ Three separate timeouts must all be sized for chained tool calls:
 | Knob | Where | Min value | Reason |
 |---|---|---|---|
 | `GitHubCopilotOptions.timeout` | per-agent | **120 s** | Orchestrator may chain 4 sequential `ask_*` tool calls (10–25 s each). 30 s is too tight and surfaces as `Timeout after 30.0s waiting for session.idle`. |
-| `mcp_servers[*].timeout` | specialist agents | same as above | MCP tool round-trip inside the agent. |
+| `mcp_servers[*].timeout` | specialist agents | `int(seconds * 1000)` | The Copilot SDK's `MCPHTTPServerConfig.timeout` is milliseconds, not seconds. |
 | `A2AClient` httpx timeout | orchestrator | `connect=10, read=120, write=30, pool=10` | An A2A POST `/invoke` waits on the peer's full LLM run. 30 s read surfaces as `httpx.ReadTimeout`. |
 
 The lab default is `ZAVA_COPILOT_TIMEOUT_SECONDS=120` (set in `docker-compose.yml::x-agent-env`).

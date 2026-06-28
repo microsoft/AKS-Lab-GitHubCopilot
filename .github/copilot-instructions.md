@@ -11,9 +11,9 @@ You are assisting on **ZavaShop**, a multi-agent retail supply-chain demo deploy
 3. Use `structlog` for logging — never `print`.
 4. Data crossing a process boundary → `pydantic.BaseModel`.
 5. Agent folder layout: `agent.py`, `tools.py`, `prompts.py`, `server.py`, `tests/`.
-6. **All agents** use `GitHubCopilotAgent` from `agent_framework.github` with `GitHubCopilotOptions(model="gpt-5.5", timeout=settings.copilot_timeout_seconds, on_permission_request=_approve_all, mcp_servers={...})`. **Never** import `GitHubCopilotChatClient`, `ChatAgent`, or `MCPStreamableHTTPTool` — they do not exist in this repo's agent-framework version.
+6. **All agents** use `GitHubCopilotAgent` from `agent_framework.github` with `client=build_copilot_client()` and `GitHubCopilotOptions(model="gpt-5.5", timeout=settings.copilot_timeout_seconds, on_permission_request=_approve_all, mcp_servers={...})`. **Never** import `GitHubCopilotChatClient`, `ChatAgent`, or `MCPStreamableHTTPTool` — they do not exist in this repo's agent-framework version.
 7. External I/O lives in MCP servers, not agent code.
-8. Auth = Workload Identity + `DefaultAzureCredential`. No secrets in env.
+8. Azure auth = Workload Identity + `DefaultAzureCredential`. Copilot auth = Key Vault `GITHUB-TOKEN` projected as `GITHUB_TOKEN` and passed explicitly by `build_copilot_client()`; never commit token values.
 9. K8s/ACA images are tagged with the git SHA, never `:latest`.
 
 ## Style cues
@@ -27,7 +27,7 @@ You are assisting on **ZavaShop**, a multi-agent retail supply-chain demo deploy
 
 Always include:
 - `SYSTEM_PROMPT` constant in `prompts.py` — terse, role-scoped, with explicit refusal rules.
-- A `build_agent()` factory in `agent.py` returning a `ChatAgent`.
+- A `build_agent()` factory in `agent.py` returning the shared `_RunnableAgent` adapter.
 - A FastAPI app in `server.py` with `/healthz`, `/readyz`, `/invoke`.
 - A `Dockerfile` based on `python:3.11-slim` with non-root user, multi-stage build.
 - A test file mocking the model with `MockChatClient`.

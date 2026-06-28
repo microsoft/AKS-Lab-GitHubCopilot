@@ -12,6 +12,8 @@ param copilotModel string = 'gpt-5.5'
 param mcpEndpoints object = {}            // map: ZAVA_<KEY>_MCP_URL -> value
 param exposeIngress bool = false
 param keyVaultName string
+param targetPort int = 8000
+param minReplicas int = 1
 ```
 
 ## Container env (mandatory)
@@ -27,7 +29,7 @@ env: [
 secrets: [
   {
     name: 'github-token'
-    keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/GITHUB-TOKEN'
+    keyVaultUrl: 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets/GITHUB-TOKEN'
     identity: uamiId
   }
 ]
@@ -46,7 +48,7 @@ identity: {
 
 ```bicep
 scale: {
-  minReplicas: 0
+  minReplicas: minReplicas
   maxReplicas: 10
   rules: [
     {
@@ -59,12 +61,12 @@ scale: {
 
 ## Probes
 
-Fleet runtime port is **8080** (MCP servers pin it in source; specialists/orchestrator match for consistency).
+Agents use runtime port **8000**; MCP servers use **8080**. Probe `targetPort` so one module works for both.
 
 ```bicep
 probes: [
-  { type: 'Liveness',  httpGet: { path: '/healthz', port: 8080 }, periodSeconds: 10 }
-  { type: 'Readiness', httpGet: { path: '/readyz',  port: 8080 }, periodSeconds: 5  }
+  { type: 'Liveness',  httpGet: { path: '/healthz', port: targetPort }, periodSeconds: 10 }
+  { type: 'Readiness', httpGet: { path: '/readyz',  port: targetPort }, periodSeconds: 5  }
 ]
 ```
 
@@ -82,4 +84,4 @@ tags: {
 
 - Image tag is the git SHA. `:latest` is a build error.
 - No `value:` for secrets — only `secretRef`.
-- `exposeIngress: true` only for the orchestrator; specialists are internal-only.
+- Lab 05 sets `exposeIngress: true` and `minReplicas: 1` for specialists and MCPs so AKS smoke/eval calls can reach ACA FQDNs reliably. Production should revisit private ingress and scale-to-zero once DNS/networking and cold-start budgets are designed.

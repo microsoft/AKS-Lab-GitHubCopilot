@@ -1,5 +1,5 @@
 ---
-description: ZavaShop specialist-agent builder — implements one MAF ChatAgent per request, strictly to spec.
+description: ZavaShop specialist-agent builder — implements one MAF GitHubCopilotAgent adapter per request, strictly to spec.
 tools: ['search/codebase', 'search', 'search/usages', 'edit/editFiles', 'execute/runInTerminal', 'findTestFiles', 'read/problems']
 ---
 
@@ -31,7 +31,7 @@ src/agents/<name>/
 ├── __init__.py        # re-export build_agent
 ├── prompts.py         # SYSTEM_PROMPT + few-shots
 ├── tools.py           # @ai_function tools with Pydantic in/out
-├── agent.py           # async def build_agent(settings) -> ChatAgent
+├── agent.py           # async def build_agent(settings) -> _RunnableAgent
 ├── server.py          # uses src.shared.server.make_app
 ├── Dockerfile         # FROM zavashop-base
 └── tests/__init__.py
@@ -39,9 +39,9 @@ src/agents/<name>/
 
 ## Hard rules
 
-1. Chat surface is **always** `GitHubCopilotAgent` from `agent_framework.github`, with `GitHubCopilotOptions(model=settings.copilot_model, timeout=settings.copilot_timeout_seconds, on_permission_request=_approve_all, mcp_servers={...})`. **No** `GitHubCopilotChatClient`, **no** `ChatAgent(client=...)`, **no** `MCPStreamableHTTPTool` — they do not exist in this repo's agent-framework version.
-2. External I/O is wired via `GitHubCopilotOptions(mcp_servers={"<key>": {"type":"http","url":...,"tools":["*"],"timeout":int(...)}})`. Never call `httpx` from `tools.py`. `tools.py` should normally export `TOOLS: list[FunctionTool] = []`.
-3. `on_permission_request=_approve_all` is **mandatory**. Without it, the SDK silently denies every tool call and the LLM hallucinates "all specialists rejected the request".
+1. Chat surface is **always** `GitHubCopilotAgent` from `agent_framework.github`, with `client=build_copilot_client()` and `GitHubCopilotOptions(model=settings.copilot_model, timeout=settings.copilot_timeout_seconds, on_permission_request=_approve_all, mcp_servers={...})`. **No** `GitHubCopilotChatClient`, **no** `ChatAgent(client=...)`, **no** `MCPStreamableHTTPTool` — they do not exist in this repo's agent-framework version.
+2. External I/O is wired via `GitHubCopilotOptions(mcp_servers={"<key>": {"type":"http","url":...,"tools":["*"],"timeout":int(settings.copilot_timeout_seconds * 1000)}})`. The MCP timeout is milliseconds. Never call `httpx` from `tools.py`. `tools.py` should normally export `TOOLS: list[FunctionTool] = []`.
+3. `on_permission_request=_approve_all` returning `PermissionDecisionApproveOnce()` is **mandatory**. Without it, the SDK silently denies every tool call and the LLM hallucinates "all specialists rejected the request".
 4. `SYSTEM_PROMPT` ends with an explicit *Refusal rules* section.
 5. `pyright --strict` and `ruff` must be clean after you finish. Run them yourself with `runCommands`.
 6. Do not modify other agents or shared code in the same turn. If you need a shared change, stop and ask the user to switch to `orchestrator-architect`.

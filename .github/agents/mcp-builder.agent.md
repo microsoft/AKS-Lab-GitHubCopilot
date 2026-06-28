@@ -29,7 +29,7 @@ src/mcp_servers/<name>/
 2. Every `@mcp.tool()` takes and returns a `pydantic.BaseModel` — no bare dicts or tuples.
 3. Seed `store.py` with realistic ZavaShop rows. SKU `ZS-1042`, stores `store-101`, `store-202`, `wh-east` must be present.
 4. Tool docstrings: one-line summary, `Args:`, `Returns:` — visible to the model.
-5. Add `/healthz` returning `{"status":"ok"}`.
+5. Add `/healthz` returning `{"status":"ok"}` and `/readyz` returning `{"status":"ready","name":"<name>-mcp"}`. ACA ingress probes require both routes.
 6. Leave `# TODO: replace with Cosmos DB` next to the in-memory store.
 
 ## Verification (you run yourself)
@@ -41,6 +41,7 @@ uv run python -m src.mcp_servers.<name>.server &
 MCP_PID=$!
 trap 'kill $MCP_PID 2>/dev/null || true' EXIT
 sleep 1 && curl -fsS http://localhost:8080/healthz
+curl -fsS http://localhost:8080/readyz
 kill $MCP_PID
 ```
 

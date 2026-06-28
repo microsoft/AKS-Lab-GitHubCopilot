@@ -18,12 +18,12 @@ You own `infra/` and `.github/workflows/` (GitHub Actions CI/CD). You do **not**
 1. Image tag is **always** the short git SHA — never `:latest` in any runtime manifest.
 2. Secrets reach the container via Key Vault → CSI (AKS) or `secretref` (ACA). No `value:` inlined. **Never** commit `.env*` files containing live tokens; preflight scans tracked `.env*` and refuses if a `github_pat_*` / `ghp_*` / Azure connection string is present. `.gitignore` must include the glob `**/.env.lab` (not just `.env.lab` at repo root) so a file dropped under `src/` or any subfolder is still ignored.
 3. Every resource tagged `project=zavashop`, `lab=<lab-number>`.
-4. ACA scale: `minReplicas: 0`, `maxReplicas: 10`, KEDA HTTP rule.
+4. ACA scale for Lab 05 smoke/eval reliability: `minReplicas: 1`, `maxReplicas: 10`, KEDA HTTP rule. Production cost-optimized variants may lower specialists to 0 after smoke gates are adjusted for cold starts.
 5. AKS deployment: WIF label, topology spread across zones, readiness `/readyz`, liveness `/healthz`.
 6. Refuse to push to ACR if any of: `git status --porcelain` is non-empty, `uv run poe check` fails, `$ACR` is unset, `az account show` errors.
-7. **Fleet runtime port is 8080.** MCP servers pin `FastMCP(host="0.0.0.0", port=8080)` in source; specialists and orchestrator bind `--port 8080` via uvicorn. If a spec asks for a different port, hand back to `mcp-builder` first — do not edit `src/`.
+7. **Fleet runtime ports:** specialists and orchestrator bind uvicorn on port 8000; MCP servers pin `FastMCP(host="0.0.0.0", port=8080, streamable_http_path="/mcp")`. If a spec asks for different ports, hand back to the owning builder first — do not edit `src/`.
 8. **Always `--platform linux/amd64`.** ACA + AKS run amd64; Apple-Silicon dev boxes will otherwise produce arm64 images that fail to start.
-9. Per-service Dockerfiles are **thin wrappers** over `src/Dockerfile.base`: `FROM ${BASE}` + `CMD [...]`. Base must build first; service builds receive `--build-arg BASE=$ACR.azurecr.io/zavashop/base:$GIT_SHA`.
+9. Agent Dockerfiles are **thin wrappers** over `src/Dockerfile.base`: `FROM ${BASE_IMAGE}` + `CMD [...]`. Base must build first; agent builds receive `--build-arg BASE_IMAGE=$ACR.azurecr.io/zavashop/base:$GIT_SHA`. MCP Dockerfiles are standalone Python 3.11 images.
 10. **CI runtime is Python 3.13**, pinned in both `.github/workflows/ci.yml` and `.github/workflows/deploy.yml` via `actions/setup-python@v5` *before* `astral-sh/setup-uv@v3`. `setup-uv@v3` does **not** accept a `python-version` input — never pass it (it is silently ignored and falls back to the runner's default 3.12, where `agent_framework` symbols are not exposed). Source code keeps `requires-python = ">=3.11"`.
 
 ## Required Azure RBAC for the GitHub Actions OIDC identity
@@ -70,7 +70,7 @@ You execute these yourself (`runCommands`) and report each step:
 ```bash
 set -euo pipefail
 GIT_SHA=$(git rev-parse --short HEAD)
-BASE="$ACR.azurecr.io/zavashop/base:$GIT_SHA"
+BASE_IMAGE="$ACR.azurecr.io/zavashop/base:$GIT_SHA"
 
 # 1. Quality gate
 uv run poe check
@@ -83,13 +83,12 @@ az acr build -r "$ACR" --platform linux/amd64 \
 mkdir -p .build-logs
 for svc in inventory supplier logistics pricing orchestrator; do
   ( az acr build -r "$ACR" --platform linux/amd64 \
-      --build-arg BASE="$BASE" \
+      --build-arg BASE_IMAGE="$BASE_IMAGE" \
       -t "zavashop/$svc:$GIT_SHA" -f "src/agents/$svc/Dockerfile" . \
       > ".build-logs/$svc.log" 2>&1 && echo "OK $svc" || echo "FAIL $svc" ) &
 done
 for mcp in inventory supplier shipping pricing; do
   ( az acr build -r "$ACR" --platform linux/amd64 \
-      --build-arg BASE="$BASE" \
       -t "zavashop/${mcp}-mcp:$GIT_SHA" -f "src/mcp_servers/$mcp/Dockerfile" . \
       > ".build-logs/${mcp}-mcp.log" 2>&1 && echo "OK ${mcp}-mcp" || echo "FAIL ${mcp}-mcp" ) &
 done
@@ -108,10 +107,10 @@ helm upgrade --install zavashop infra/aks/helm/zavashop \
   --set workloadIdentity.clientId="$UAMI_CLIENT_ID" \
   --set keyVault.name="$KV" \
   --set tenantId="$(az account show --query tenantId -o tsv)" \
-  --set a2a.inventory="$ZAVA_INVENTORY_A2A_URL" \
-  --set a2a.supplier="$ZAVA_SUPPLIER_A2A_URL" \
-  --set a2a.logistics="$ZAVA_LOGISTICS_A2A_URL" \
-  --set a2a.pricing="$ZAVA_PRICING_A2A_URL"
+  --set a2a.inventory="$ZAVA_INVENTORY_URL" \
+  --set a2a.supplier="$ZAVA_SUPPLIER_URL" \
+  --set a2a.logistics="$ZAVA_LOGISTICS_URL" \
+  --set a2a.pricing="$ZAVA_PRICING_URL"
 kubectl -n zavashop rollout status deploy/orchestrator
 ```
 
@@ -133,6 +132,7 @@ for _ in {1..80}; do
   curl -fsS --max-time 5 "http://$ORCH_IP/healthz" >/dev/null && break
   sleep 5
 done
+curl -fsS --max-time 5 "http://$ORCH_IP/readyz" >/dev/null
 
 curl -fsS -X POST "http://$ORCH_IP/plan" \
   -H 'content-type: application/json' \

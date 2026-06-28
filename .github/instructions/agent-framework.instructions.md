@@ -9,7 +9,10 @@ applyTo: "src/agents/**/*.py,src/mcp_servers/**/*.py"
 ```python
 from agent_framework import AgentResponse, FunctionTool, tool
 from agent_framework.github import GitHubCopilotAgent, GitHubCopilotOptions
+from copilot.generated.rpc import PermissionDecisionApproveOnce
 from copilot.session import PermissionRequestResult
+
+from src.shared.copilot import build_copilot_client
 ```
 
 For MCP servers (FastMCP, not agents):
@@ -28,12 +31,13 @@ from mcp.server.fastmcp import FastMCP
 
 ```python
 def _approve_all(_req: object, _ctx: dict[str, str]) -> PermissionRequestResult:
-    return PermissionRequestResult(kind="approved")
+    return PermissionDecisionApproveOnce()
 
 
 async def build_agent(settings: Settings) -> _RunnableAgent:
     agent = GitHubCopilotAgent(
         instructions=SYSTEM_PROMPT,
+        client=build_copilot_client(),
         name="inventory",
         description="ZavaShop inventory specialist (...).",
         tools=list(TOOLS),               # usually [] — MCP is wired below
@@ -46,7 +50,7 @@ async def build_agent(settings: Settings) -> _RunnableAgent:
                     "type": "http",
                     "url": settings.inventory_mcp_url,
                     "tools": ["*"],
-                    "timeout": int(settings.copilot_timeout_seconds),
+                    "timeout": int(settings.copilot_timeout_seconds * 1000),
                 },
             },
         ),
@@ -54,11 +58,11 @@ async def build_agent(settings: Settings) -> _RunnableAgent:
     return _RunnableAgent(agent=agent)
 ```
 
-`on_permission_request=_approve_all` is mandatory. Without it the SDK denies every tool call and the LLM silently reports "all specialists rejected the request".
+`client=build_copilot_client()` is mandatory so the lab `GITHUB_TOKEN` is passed explicitly to the Copilot SDK. `on_permission_request=_approve_all` is also mandatory. Without it the SDK denies every tool call and the LLM silently reports "all specialists rejected the request". `mcp_servers[*].timeout` is milliseconds, unlike `GitHubCopilotOptions.timeout`, which is seconds.
 
 ## The orchestrator (`src/agents/orchestrator/`)
 
-- Same `GitHubCopilotAgent(... model="gpt-5.5" ...)` — auth via `GITHUB_TOKEN` from Workload Identity Federation, never a PAT in env.
+- Same `GitHubCopilotAgent(... model="gpt-5.5" ...)` with `client=build_copilot_client()` — the `GITHUB_TOKEN` comes from Key Vault at runtime and is never checked in.
 - Implements a MAF **Workflow** for the deterministic `/plan` endpoint. The LLM `/invoke` path uses four `@tool`-decorated A2A delegators (`ask_inventory`, `ask_supplier`, `ask_logistics`, `ask_pricing`).
 - Wrap fan-out steps in `WorkflowBuilder` parallel edges so we can observe latency per branch.
 - The orchestrator **also** needs `on_permission_request=_approve_all` — the `ask_*` function tools go through the same permission gate as MCP tools.
@@ -110,6 +114,7 @@ async def check_stock(req: StockQuery) -> StockReport:
 - One MCP server per backend system (`inventory`, `supplier`, `shipping`, `pricing`).
 - Use `mcp.server.fastmcp.FastMCP`. Expose tools via `@mcp.tool()`.
 - Each MCP server has its own Dockerfile and ACA deployment.
+- Each MCP server exposes `/healthz`, `/readyz`, and streamable HTTP MCP on `/mcp`.
 
 ## Errors
 

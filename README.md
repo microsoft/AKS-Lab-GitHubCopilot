@@ -5,6 +5,8 @@
 > A hands-on lab series that teaches you to deliver a multi-agent retail supply-chain solution **end-to-end through a team of six GitHub Copilot Custom Coding Agents** — from requirements through deployment.
 > Stack: **Microsoft Agent Framework (MAF)** + **GitHub Copilot SDK** (`gpt-5.5`) + **AKS** + **Azure Container Apps** + **Microsoft Entra ID** + **Microsoft Defender for Cloud**.
 
+This repo now includes the packaged ZavaShop stock-out response fleet: five MAF agents, four FastMCP servers, focused tests and evals, Docker packaging, ACA Bicep, AKS Helm, and GitHub Actions deployment gates.
+
 ---
 
 ## 🧭 What makes this lab different
@@ -41,9 +43,21 @@ Fast path:
 
 1. Complete [Lab 01](./labs/lab-01-environment-setup/README.md) once to create the Azure foundation.
 2. Run `/feature-from-issue` with the ZavaShop stock-out scenario. Follow its handoffs to the owning custom agents instead of manually designing each coding prompt.
-3. Run `/ship-it` to build all service images, deploy ACA specialists/MCP servers, deploy the AKS orchestrator, smoke-test `/healthz`, and run evals.
+3. Run `/ship-it` to build all service images, deploy ACA specialists/MCP servers, deploy the AKS orchestrator, smoke-test `/healthz` + `/readyz`, and run evals.
 
 This reduces the application coding portion from open-ended manual prompting into a guided workflow while preserving the same generated structure under `src/`, `tests/`, and `infra/`. The resulting deployment must still satisfy the AKS landing zone, Entra ID, and Defender for Cloud gates described in Labs 01 and 05.
+
+### Current packaged fleet
+
+The fast path produces these runtime services:
+
+| Layer | Services | Runtime | Ports and probes |
+|---|---|---|---|
+| Orchestration | `orchestrator` | AKS + Helm | Uvicorn on `8000`; `/healthz`, `/readyz`, `/plan`, `/invoke` |
+| Specialists | `inventory`, `supplier`, `logistics`, `pricing` | Azure Container Apps | Uvicorn on `8000`; `/healthz`, `/readyz`, `/invoke` |
+| MCP tools | `inventory-mcp`, `supplier-mcp`, `shipping-mcp`, `pricing-mcp` | Azure Container Apps | FastMCP on `8080`; `/healthz`, `/readyz`, `/mcp` |
+
+Images are tagged with the short git SHA and built through ACR Tasks for `linux/amd64`. Lab 05 keeps ACA specialists and MCP servers at `minReplicas=1` so workshop smoke tests and live evals are reliable; production landing zones can revisit private ingress and scale-to-zero after DNS, network, and cold-start budgets are designed.
 
 ---
 
@@ -59,23 +73,57 @@ This reduces the application coding portion from open-ended manual prompting int
 | `PricingAgent` | Recommend dynamic pricing from demand + competitor signals |
 | `OrchestratorAgent` | The "store manager" — powered by the **GitHub Copilot SDK**, routes goals to the specialist agents |
 
-The orchestrator runs as a **long-lived service on AKS**. The specialist agents run as **event-driven workloads on ACA** with **KEDA scale-to-zero**. All agents share a fleet of **MCP servers** that wrap ZavaShop's domain tools (inventory DB, supplier API, shipping API, pricing API).
+The orchestrator runs as a **long-lived service on AKS**. The specialist agents and MCP servers run on **Azure Container Apps**. In the lab deployment they are exposed by ACA HTTPS FQDNs with `minReplicas=1` for repeatable smoke/eval runs; the same Bicep module can be adjusted for private ingress and scale-to-zero in a production landing zone. Each specialist reaches its backend capability through a dedicated **MCP server** so the LLM never owns business state.
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│                       AKS  (control plane)                     │
-│   ┌──────────────────────────────────────────────────────────┐ │
-│   │  OrchestratorAgent  (GitHub Copilot SDK + MAF Workflow)  │ │
-│   └─────────┬────────────────────────────────────────────────┘ │
-└─────────────┼──────────────────────────────────────────────────┘
-              │ A2A / HTTP
-   ┌──────────┼──────────┬──────────────┬──────────────┐
-   ▼          ▼          ▼              ▼              ▼
-┌─────────┐┌─────────┐┌──────────┐┌────────────┐┌──────────┐
-│Inventory││Supplier ││Logistics ││  Pricing   ││   MCP    │
-│  ACA    ││  ACA    ││   ACA    ││    ACA     ││ Servers  │
-└─────────┘└─────────┘└──────────┘└────────────┘└──────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Security + identity guardrails                                               │
+│                                                                              │
+│  Microsoft Entra ID + Azure RBAC                                             │
+│  - GitHub Actions OIDC -> UAMI                                               │
+│  - AKS Workload Identity / ACA managed identity                              │
+│  - Key Vault GITHUB-TOKEN -> CSI on AKS / secretref on ACA                   │
+│                                                                              │
+│  Microsoft Defender for Cloud                                                │
+│  - AKS Defender monitoring                                                   │
+│  - Defender Containers + KeyVaults plans must be Standard                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ AKS                                                                          │
+│  OrchestratorAgent (MAF Workflow + GitHub Copilot SDK)                       │
+│  ServiceAccount: orchestrator-sa + azure.workload.identity/use=true          │
+│  Routes: /healthz, /readyz, /plan, /invoke                                   │
+└─────────────────────────────────────┬────────────────────────────────────────┘
+                                      │ A2A / HTTP (/invoke)
+                                      ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Azure Container Apps specialists                                             │
+│  inventory  | supplier  | logistics  | pricing                               │
+│  Routes: /healthz, /readyz, /invoke                                          │
+└─────────────────────────────────────┬────────────────────────────────────────┘
+                                      │ Copilot SDK remote MCP over HTTP
+                                      ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Azure Container Apps MCP servers                                             │
+│  inventory-mcp | supplier-mcp | shipping-mcp | pricing-mcp                  │
+│  Routes: /healthz, /readyz, /mcp                                             │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Entra ID and Defender for Cloud in the architecture
+
+These controls sit around the fleet rather than inside the retail business logic. They are enforced by Lab 01 infrastructure and re-checked by the `/ship-it` and GitHub Actions deployment path before workloads roll forward.
+
+| Control | Where it appears | What it protects |
+|---|---|---|
+| Microsoft Entra ID for AKS | The deployment preflight checks that the AKS `aadProfile` exists before deploying. Human cluster access is expected to use Entra ID and Azure RBAC, not admin kubeconfig. | Prevents unmanaged local cluster credentials from becoming the normal operator path. |
+| GitHub Actions OIDC | The workflow grants `id-token: write` and uses `azure/login@v2` with `AZURE_CLIENT_ID`, tenant, and subscription values. | Lets CI/CD authenticate to Azure without storing a client secret in GitHub. |
+| Workload Identity and UAMI | The AKS orchestrator uses `orchestrator-sa` with the Workload Identity label; ACA apps use the same user-assigned managed identity pattern. | Gives workloads Azure identity without embedding passwords or service principal secrets. |
+| Key Vault secret delivery | AKS reads `GITHUB-TOKEN` through Secrets Store CSI; ACA reads it through Key Vault `secretref`. | Keeps Copilot credentials out of Helm values, Bicep parameters, images, and source control. |
+| Defender for Cloud | The deployment preflight requires AKS Defender security monitoring and `Standard` tiers for `Containers` and `KeyVaults`. | Blocks rollout when container and secret surfaces are not covered by the lab security baseline. |
+| Azure Policy gate | The deployment preflight checks the AKS Azure Policy add-on. | Keeps the cluster aligned with the AKS landing-zone baseline before application rollout. |
 
 ### Story arc across the labs
 
@@ -84,10 +132,10 @@ The five labs are five chapters of one story — ZavaShop going from a blank Azu
 | Lab | Chapter | What changes in ZavaShop's world |
 |---|---|---|
 | 01 | **Day 0 — lay the foundation** | The platform team provisions the loading docks (ACR), the shop floor (AKS), the bursty back-of-house (ACA), the safe (Key Vault), and the single staff badge (UAMI) that every worker will wear. |
-| 02 | **Hire the specialists** | Each business role becomes a typed MAF `ChatAgent`. Inventory, Supplier, Logistics, Pricing, and the Orchestrator are born — every external system kept behind an MCP server so the LLM never owns business state. Fast-track users can drive this through `/feature-from-issue`. |
+| 02 | **Hire the specialists** | Each business role becomes a typed MAF `GitHubCopilotAgent` wrapped by the shared `_RunnableAgent` adapter. Inventory, Supplier, Logistics, Pricing, and the Orchestrator are born — every external system kept behind an MCP server so the LLM never owns business state. Fast-track users can drive this through `/feature-from-issue`. |
 | 03 | **Make them a team** | The orchestrator stops being a one-shot LLM call and becomes a deterministic `Workflow`. Secrets leave `.env` and move into Key Vault. The whole fleet boots locally via Docker Compose so a `/plan` can be debugged end-to-end without the cloud. |
-| 04 | **Earn trust before opening day** | A four-layer test pyramid + five golden eval scenarios (S1–S5) pin the fleet's behaviour. The same `uv run poe check` runs in GitHub Actions, so even Copilot-authored PRs must pass the human bar. |
-| 05 | **Open the store** | `/ship-it` rolls the orchestrator to AKS behind Workload Identity + CSI-mounted token, and the 8 specialist/MCP services to ACA with scale-to-zero. GitHub Actions OIDC re-runs the same pipeline on every `main`, with AKS landing zone, Entra ID, Azure Policy, monitoring, and Defender for Cloud checks. |
+| 04 | **Earn trust before opening day** | Unit, integration, and live eval checks pin the fleet's behaviour. The same `uv run poe check` runs in GitHub Actions, so even Copilot-authored PRs must pass the human bar. |
+| 05 | **Open the store** | `/ship-it` rolls the orchestrator to AKS behind Workload Identity + CSI-mounted token, and the 8 specialist/MCP services to ACA with Key Vault `secretref`, external lab FQDNs, and `minReplicas=1` for smoke reliability. GitHub Actions OIDC re-runs the same pipeline on every `main`, with AKS landing zone, Entra ID, Azure Policy, monitoring, and Defender for Cloud checks. |
 
 > ⚠️ Don't confuse the two layers:
 > - **Application agents** (the table above) — the runtime ZavaShop fleet you deploy.
@@ -112,7 +160,7 @@ Workflow prompts in [.github/prompts/](.github/prompts/):
 
 - **`/feature-from-issue`** — issue → spec → code → tests → PR → deploy.
 - **`/spec-to-code`** — drive an existing spec through code + tests.
-- **`/ship-it`** — quality gate → build → push → ACR/ACA/AKS rollout → smoke + evals.
+- **`/ship-it`** — quality gate → landing-zone preflight → ACR Tasks build → ACA/AKS rollout → `/healthz` + `/readyz` smoke → evals.
 
 > **Hard rule (see [AGENTS.md](AGENTS.md) §1.1):** for every code change, invoke the right `/<agent>` from the table above. Each agent carries the tools, skills, and refusal rules needed for its slice of the repo.
 
@@ -126,7 +174,7 @@ Workflow prompts in [.github/prompts/](.github/prompts/):
 | 02 | [Agent Creation](./labs/lab-02-agent-creation/README.md) | `/requirements-analyst` → `/mcp-builder` ×4 → `/agent-builder` ×4 → `/orchestrator-architect` | The five ZavaShop application agents in Python with MAF + Copilot SDK |
 | 03 | [Multi-Agent Orchestration & Config](./labs/lab-03-orchestration/README.md) | `/requirements-analyst` → `/spec-to-code` → `/orchestrator-architect` | MAF Workflow, A2A wiring, MCP tools, Key Vault hydration, Docker Compose |
 | 04 | [Testing](./labs/lab-04-testing/README.md) | `/test-author` (unit + MCP + integration + evals) → remote **GitHub Copilot Coding Agent** PR loop | Full test pyramid; assign GitHub-side Copilot to a failing-eval issue |
-| 05 | [Deployment & Run](./labs/lab-05-deployment/README.md) | `/deploy-engineer` + `/ship-it` | Packaged app images, Helm for AKS, Bicep for ACA, OIDC-federated CD, landing zone security gates, Day-2 partial roll |
+| 05 | [Deployment & Run](./labs/lab-05-deployment/README.md) | `/deploy-engineer` + `/ship-it` | Packaged app images, Helm for AKS, Bicep for ACA, OIDC-federated CD, readiness probes, landing zone security gates, Day-2 partial roll |
 
 Each lab opens with its own **ZavaShop story** beat and a curated **Microsoft Learn knowledge points** list — read those first to anchor the operations in concepts.
 
@@ -211,6 +259,8 @@ The Learn references are grouped by the concern they answer. Every link is also 
 ```
 .
 ├── AGENTS.md                        # House rules — read this first
+├── pyproject.toml                    # uv/ruff/pyright/pytest/poe configuration
+├── .dockerignore                     # Keeps secrets/caches out of ACR build context
 ├── .github/
 │   ├── copilot-instructions.md      # Always-on Copilot context
 │   ├── agents/                      # 6 Copilot Custom Coding Agents (*.agent.md)
@@ -221,13 +271,23 @@ The Learn references are grouped by the concern they answer. Every link is also 
 ├── labs/                            # The 5 step-by-step labs
 ├── specs/                           # Authored by /requirements-analyst
 ├── src/
+│   ├── Dockerfile.base               # Shared base image for app agents
 │   ├── agents/                      # ZavaShop application agents (one folder each)
-│   ├── mcp_servers/                 # MCP tool servers (one folder each)
-│   └── shared/                      # Settings, telemetry, A2A server factory, KV helper
+│   │   ├── orchestrator/             # AKS orchestrator: /plan + /invoke
+│   │   ├── inventory/                # ACA specialist: stock-out response
+│   │   ├── supplier/                 # ACA specialist: PO drafting
+│   │   ├── logistics/                # ACA specialist: shipment planning
+│   │   └── pricing/                  # ACA specialist: price recommendation
+│   ├── mcp_servers/                 # FastMCP tool servers on /mcp
+│   │   ├── inventory/
+│   │   ├── supplier/
+│   │   ├── shipping/
+│   │   └── pricing/
+│   └── shared/                      # Settings, telemetry, Copilot client, A2A server factory
 ├── infra/
 │   ├── aks/                         # Helm chart + WIF docs (authored by /deploy-engineer)
-│   └── aca/                         # ACA Bicep + deploy.sh   (authored by /deploy-engineer)
-└── tests/                           # Unit · integration · evals (authored by /test-author)
+│   └── aca/                         # ACA Bicep module + deploy.sh + FQDN export
+└── tests/                           # Unit · integration · live evals (authored by /test-author)
 ```
 
 ## License

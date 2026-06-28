@@ -101,8 +101,8 @@ spec:
 - `topologySpreadConstraints` over `topology.kubernetes.io/zone`, `maxSkew: 1`.
 - Non-root pod and container security contexts from `values.yaml`.
 - Mount the CSI volume; project `GITHUB_TOKEN` env via `secretKeyRef` to `github-token/token`.
-- Env: `AZURE_CLIENT_ID`, `ZAVA_COPILOT_MODEL=gpt-5.5`, `ZAVA_COPILOT_TIMEOUT_SECONDS=120`, four `ZAVA_<NAME>_A2A_URL` from `.Values.a2a.*`.
-- Probes: `/healthz`, `/readyz` on port 8080 (fleet runtime port — see deploy-engineer rule 7).
+- Env: `AZURE_CLIENT_ID`, `ZAVA_COPILOT_MODEL=gpt-5.5`, `ZAVA_COPILOT_TIMEOUT_SECONDS=120`, and four specialist A2A URLs from `.Values.a2a.*`.
+- Probes: `/healthz`, `/readyz` on the orchestrator service port 8000 (see deploy-engineer rule 7).
 
 ## Landing zone expectations
 

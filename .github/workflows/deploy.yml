@@ -94,6 +94,7 @@ jobs:
         run: |
           ACR_LOGIN_SERVER="$ACR.azurecr.io"
           az acr build -r "$ACR" \
+            --platform linux/amd64 \
             -t "zavashop/base:$GIT_SHA" \
             -f src/Dockerfile.base .
 
@@ -101,6 +102,7 @@ jobs:
             dockerfile="src/agents/$service/Dockerfile"
             if [[ -f "$dockerfile" ]]; then
               az acr build -r "$ACR" \
+                --platform linux/amd64 \
                 -t "zavashop/$service:$GIT_SHA" \
                 --build-arg BASE_IMAGE="$ACR_LOGIN_SERVER/zavashop/base:$GIT_SHA" \
                 -f "$dockerfile" .
@@ -109,6 +111,7 @@ jobs:
 
           for service in inventory supplier shipping pricing; do
             az acr build -r "$ACR" \
+              --platform linux/amd64 \
               -t "zavashop/$service-mcp:$GIT_SHA" \
               -f "src/mcp_servers/$service/Dockerfile" .
           done
@@ -156,6 +159,8 @@ jobs:
             fi
             sleep 5
           done
+
+          curl -fsS "http://$ORCH/readyz"
 
           curl -fsS -X POST "http://$ORCH/plan" \
             -H 'content-type: application/json' \
