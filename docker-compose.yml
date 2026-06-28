@@ -78,7 +78,7 @@ services:
       context: .
       dockerfile: src/agents/inventory/Dockerfile
       args:
-        GIT_SHA: ${GIT_SHA:?set GIT_SHA to the current git SHA}
+        BASE_IMAGE: zavashop-base:${GIT_SHA:?set GIT_SHA to the current git SHA}
     environment: *agent-env
     depends_on:
       inventory-mcp:
@@ -91,7 +91,7 @@ services:
       context: .
       dockerfile: src/agents/supplier/Dockerfile
       args:
-        GIT_SHA: ${GIT_SHA:?set GIT_SHA to the current git SHA}
+        BASE_IMAGE: zavashop-base:${GIT_SHA:?set GIT_SHA to the current git SHA}
     environment: *agent-env
     depends_on:
       supplier-mcp:
@@ -104,7 +104,7 @@ services:
       context: .
       dockerfile: src/agents/logistics/Dockerfile
       args:
-        GIT_SHA: ${GIT_SHA:?set GIT_SHA to the current git SHA}
+        BASE_IMAGE: zavashop-base:${GIT_SHA:?set GIT_SHA to the current git SHA}
     environment: *agent-env
     depends_on:
       shipping-mcp:
@@ -117,7 +117,7 @@ services:
       context: .
       dockerfile: src/agents/pricing/Dockerfile
       args:
-        GIT_SHA: ${GIT_SHA:?set GIT_SHA to the current git SHA}
+        BASE_IMAGE: zavashop-base:${GIT_SHA:?set GIT_SHA to the current git SHA}
     environment: *agent-env
     depends_on:
       pricing-mcp:
@@ -130,7 +130,7 @@ services:
       context: .
       dockerfile: src/agents/orchestrator/Dockerfile
       args:
-        GIT_SHA: ${GIT_SHA:?set GIT_SHA to the current git SHA}
+        BASE_IMAGE: zavashop-base:${GIT_SHA:?set GIT_SHA to the current git SHA}
     environment: *agent-env
     depends_on:
       inventory:

@@ -1,5 +1,5 @@
-ARG GIT_SHA
-FROM zavashop-base:${GIT_SHA}
+ARG BASE_IMAGE=zavashop-base:dev
+FROM ${BASE_IMAGE}
 
 LABEL org.opencontainers.image.source="https://github.com/kinfey/AKS-Lab-GitHubCopilot"
 

@@ -102,6 +102,7 @@ jobs:
             if [[ -f "$dockerfile" ]]; then
               az acr build -r "$ACR" \
                 -t "zavashop/$service:$GIT_SHA" \
+                --build-arg BASE_IMAGE="$ACR_LOGIN_SERVER/zavashop/base:$GIT_SHA" \
                 -f "$dockerfile" .
             fi
           done
