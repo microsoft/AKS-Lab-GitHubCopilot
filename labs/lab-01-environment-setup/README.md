@@ -436,4 +436,12 @@ If these checks pass, you're ready for [Lab 02 — Agent Creation](../lab-02-age
 | Copilot Chat unable to reach GitHub | Corp proxy — set `HTTPS_PROXY` env var in VS Code's terminal profile. |
 | GitHub Actions: `The resource with name '<acr>' ... could not be found` | The UAMI is missing `Contributor` (or any role that grants `Microsoft.ContainerRegistry/registries/read`) on the RG. `AcrPull` is data-plane only and produces this **misleading "not found"** error. Re-run step 3. |
 | GitHub Actions OIDC: `AADSTS70021` / `no matching federated identity record` | The federated credential `gha-aks-lab-main` is missing or its `subject` doesn't match `repo:OWNER/REPO:ref:refs/heads/main`. Re-run the `az identity federated-credential create` in step 4. |
-| `.env.lab` accidentally committed | Rotate the GitHub PAT *immediately*, then `git rm --cached path/to/.env.lab && git commit && git push`. For full history scrub use `git filter-repo` (destructive — coordinate with collaborators). |
+| `.env.lab` accidentally committed | Rotate the GitHub PAT *immediately*, then `git rm --cached path/to/.env.lab && git commit && git push`. For full history scrub use `git filter-repo` (destructive — coordinate with collaborators).
+
+
+## Lab 01 — Evidence
+### Terminal verification
+![Lab 01 terminal verification](../../evidence/lab-01/terminal.png)
+
+### Azure Portal
+![Lab 01 Azure resources](../../evidence/lab-01/portal.png)

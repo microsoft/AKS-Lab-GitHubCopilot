@@ -1,7 +1,7 @@
 name: zavashop-stockout
 
 x-agent-env: &agent-env
-  ZAVA_COPILOT_MODEL: gpt-5.5
+  ZAVA_COPILOT_MODEL: ${ZAVA_COPILOT_MODEL:-gpt-5.5}
   ZAVA_COPILOT_TIMEOUT_SECONDS: "120"
   ZAVA_INVENTORY_MCP_URL: http://inventory-mcp:8080/mcp
   ZAVA_SUPPLIER_MCP_URL: http://supplier-mcp:8080/mcp
@@ -35,50 +35,68 @@ x-mcp-healthcheck: &mcp-healthcheck
   retries: 12
   start_period: 15s
 
+x-amd64: &amd64
+  platform: linux/amd64
+
+x-mcp-build: &mcp-build
+  context: .
+  platforms: [linux/amd64]
+
+x-agent-build: &agent-build
+  context: .
+  platforms: [linux/amd64]
+  args:
+    BASE_IMAGE: zavashop-base:${GIT_SHA:?set GIT_SHA to the current git SHA}
+
 services:
   zavashop-base:
+    <<: *amd64
     image: zavashop-base:${GIT_SHA:?set GIT_SHA to the current git SHA}
     build:
       context: .
       dockerfile: src/Dockerfile.base
+      platforms: [linux/amd64]
     command: ["python", "-c", "import time; time.sleep(1)"]
     profiles: ["build"]
 
   inventory-mcp:
+    <<: *amd64
     image: zavashop/inventory-mcp:${GIT_SHA:?set GIT_SHA to the current git SHA}
     build:
-      context: .
+      <<: *mcp-build
       dockerfile: src/mcp_servers/inventory/Dockerfile
     healthcheck: *mcp-healthcheck
 
   supplier-mcp:
+    <<: *amd64
     image: zavashop/supplier-mcp:${GIT_SHA:?set GIT_SHA to the current git SHA}
     build:
-      context: .
+      <<: *mcp-build
       dockerfile: src/mcp_servers/supplier/Dockerfile
     healthcheck: *mcp-healthcheck
 
   shipping-mcp:
+    <<: *amd64
     image: zavashop/shipping-mcp:${GIT_SHA:?set GIT_SHA to the current git SHA}
     build:
-      context: .
+      <<: *mcp-build
       dockerfile: src/mcp_servers/shipping/Dockerfile
     healthcheck: *mcp-healthcheck
 
   pricing-mcp:
+    <<: *amd64
     image: zavashop/pricing-mcp:${GIT_SHA:?set GIT_SHA to the current git SHA}
     build:
-      context: .
+      <<: *mcp-build
       dockerfile: src/mcp_servers/pricing/Dockerfile
     healthcheck: *mcp-healthcheck
 
   inventory:
+    <<: *amd64
     image: zavashop/inventory:${GIT_SHA:?set GIT_SHA to the current git SHA}
     build:
-      context: .
+      <<: *agent-build
       dockerfile: src/agents/inventory/Dockerfile
-      args:
-        BASE_IMAGE: zavashop-base:${GIT_SHA:?set GIT_SHA to the current git SHA}
     environment: *agent-env
     depends_on:
       inventory-mcp:
@@ -86,12 +104,11 @@ services:
     healthcheck: *agent-healthcheck
 
   supplier:
+    <<: *amd64
     image: zavashop/supplier:${GIT_SHA:?set GIT_SHA to the current git SHA}
     build:
-      context: .
+      <<: *agent-build
       dockerfile: src/agents/supplier/Dockerfile
-      args:
-        BASE_IMAGE: zavashop-base:${GIT_SHA:?set GIT_SHA to the current git SHA}
     environment: *agent-env
     depends_on:
       supplier-mcp:
@@ -99,12 +116,11 @@ services:
     healthcheck: *agent-healthcheck
 
   logistics:
+    <<: *amd64
     image: zavashop/logistics:${GIT_SHA:?set GIT_SHA to the current git SHA}
     build:
-      context: .
+      <<: *agent-build
       dockerfile: src/agents/logistics/Dockerfile
-      args:
-        BASE_IMAGE: zavashop-base:${GIT_SHA:?set GIT_SHA to the current git SHA}
     environment: *agent-env
     depends_on:
       shipping-mcp:
@@ -112,12 +128,11 @@ services:
     healthcheck: *agent-healthcheck
 
   pricing:
+    <<: *amd64
     image: zavashop/pricing:${GIT_SHA:?set GIT_SHA to the current git SHA}
     build:
-      context: .
+      <<: *agent-build
       dockerfile: src/agents/pricing/Dockerfile
-      args:
-        BASE_IMAGE: zavashop-base:${GIT_SHA:?set GIT_SHA to the current git SHA}
     environment: *agent-env
     depends_on:
       pricing-mcp:
@@ -125,12 +140,11 @@ services:
     healthcheck: *agent-healthcheck
 
   orchestrator:
+    <<: *amd64
     image: zavashop/orchestrator:${GIT_SHA:?set GIT_SHA to the current git SHA}
     build:
-      context: .
+      <<: *agent-build
       dockerfile: src/agents/orchestrator/Dockerfile
-      args:
-        BASE_IMAGE: zavashop-base:${GIT_SHA:?set GIT_SHA to the current git SHA}
     environment: *agent-env
     depends_on:
       inventory:

@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
+from .keyvault import hydrate_from_keyvault
 from .settings import Settings
 from .telemetry import setup_tracing
 
@@ -77,7 +78,9 @@ def make_app(*, name: str, build: AgentBuilder, settings: Settings | None = None
         FastAPI app exposing /healthz, /readyz, and /invoke.
     """
 
-    app_settings = settings or Settings()
+    settings_overrides = (
+        {field: getattr(settings, field) for field in settings.model_fields_set} if settings is not None else {}
+    )
     agent: _Runnable | None = None
 
     @asynccontextmanager
@@ -85,7 +88,9 @@ def make_app(*, name: str, build: AgentBuilder, settings: Settings | None = None
         nonlocal agent
         setup_tracing(service_name=name)
         log.info("agent.startup.begin", agent_name=name)
-        agent = await build(app_settings)
+        await hydrate_from_keyvault(settings=settings)
+        agent_settings = Settings(**settings_overrides)
+        agent = await build(agent_settings)
         log.info("agent.startup.end", agent_name=name)
         yield
 

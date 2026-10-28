@@ -1,0 +1,534 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Quality checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Sync dependencies
+        run: uv sync --frozen --all-groups
+
+      - name: Check
+        run: uv run --frozen poe check
+
+      - name: Audit
+        run: uv run --frozen poe audit
+
+  image-security:
+    name: Build and scan images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image tag
+        id: image-tag
+        run: echo "git_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare report directory
+        run: mkdir -p image-security-reports
+
+      - name: Build base and service images
+        id: build-images
+        env:
+          GIT_SHA: ${{ steps.image-tag.outputs.git_sha }}
+        run: |
+          set -euo pipefail
+          export GIT_SHA
+          export GITHUB_TOKEN=build-only-placeholder
+          docker compose --profile build build zavashop-base
+          docker compose build \
+            inventory-mcp supplier-mcp shipping-mcp pricing-mcp \
+            inventory supplier logistics pricing orchestrator
+          unset GITHUB_TOKEN
+
+      - name: Report base
+        id: report-base
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: zavashop-base:${{ steps.image-tag.outputs.git_sha }}
+          format: json
+          scanners: vuln
+          output: image-security-reports/base.json
+          exit-code: "0"
+
+      - name: Report inventory-mcp
+        id: report-inventory-mcp
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: zavashop/inventory-mcp:${{ steps.image-tag.outputs.git_sha }}
+          format: json
+          scanners: vuln
+          output: image-security-reports/inventory-mcp.json
+          exit-code: "0"
+
+      - name: Report supplier-mcp
+        id: report-supplier-mcp
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: zavashop/supplier-mcp:${{ steps.image-tag.outputs.git_sha }}
+          format: json
+          scanners: vuln
+          output: image-security-reports/supplier-mcp.json
+          exit-code: "0"
+
+      - name: Report shipping-mcp
+        id: report-shipping-mcp
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: zavashop/shipping-mcp:${{ steps.image-tag.outputs.git_sha }}
+          format: json
+          scanners: vuln
+          output: image-security-reports/shipping-mcp.json
+          exit-code: "0"
+
+      - name: Report pricing-mcp
+        id: report-pricing-mcp
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: zavashop/pricing-mcp:${{ steps.image-tag.outputs.git_sha }}
+          format: json
+          scanners: vuln
+          output: image-security-reports/pricing-mcp.json
+          exit-code: "0"
+
+      - name: Report inventory
+        id: report-inventory
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: zavashop/inventory:${{ steps.image-tag.outputs.git_sha }}
+          format: json
+          scanners: vuln
+          output: image-security-reports/inventory.json
+          exit-code: "0"
+
+      - name: Report supplier
+        id: report-supplier
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: zavashop/supplier:${{ steps.image-tag.outputs.git_sha }}
+          format: json
+          scanners: vuln
+          output: image-security-reports/supplier.json
+          exit-code: "0"
+
+      - name: Report logistics
+        id: report-logistics
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: zavashop/logistics:${{ steps.image-tag.outputs.git_sha }}
+          format: json
+          scanners: vuln
+          output: image-security-reports/logistics.json
+          exit-code: "0"
+
+      - name: Report pricing
+        id: report-pricing
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: zavashop/pricing:${{ steps.image-tag.outputs.git_sha }}
+          format: json
+          scanners: vuln
+          output: image-security-reports/pricing.json
+          exit-code: "0"
+
+      - name: Report orchestrator
+        id: report-orchestrator
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: zavashop/orchestrator:${{ steps.image-tag.outputs.git_sha }}
+          format: json
+          scanners: vuln
+          output: image-security-reports/orchestrator.json
+          exit-code: "0"
+
+      - name: Gate base image
+        id: gate-base
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        continue-on-error: true
+        with:
+          image-ref: zavashop-base:${{ steps.image-tag.outputs.git_sha }}
+          format: table
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Gate inventory-mcp image
+        id: gate-inventory-mcp
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        continue-on-error: true
+        with:
+          image-ref: zavashop/inventory-mcp:${{ steps.image-tag.outputs.git_sha }}
+          format: table
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Gate supplier-mcp image
+        id: gate-supplier-mcp
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        continue-on-error: true
+        with:
+          image-ref: zavashop/supplier-mcp:${{ steps.image-tag.outputs.git_sha }}
+          format: table
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Gate shipping-mcp image
+        id: gate-shipping-mcp
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        continue-on-error: true
+        with:
+          image-ref: zavashop/shipping-mcp:${{ steps.image-tag.outputs.git_sha }}
+          format: table
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Gate pricing-mcp image
+        id: gate-pricing-mcp
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        continue-on-error: true
+        with:
+          image-ref: zavashop/pricing-mcp:${{ steps.image-tag.outputs.git_sha }}
+          format: table
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Gate inventory image
+        id: gate-inventory
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        continue-on-error: true
+        with:
+          image-ref: zavashop/inventory:${{ steps.image-tag.outputs.git_sha }}
+          format: table
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Gate supplier image
+        id: gate-supplier
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        continue-on-error: true
+        with:
+          image-ref: zavashop/supplier:${{ steps.image-tag.outputs.git_sha }}
+          format: table
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Gate logistics image
+        id: gate-logistics
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        continue-on-error: true
+        with:
+          image-ref: zavashop/logistics:${{ steps.image-tag.outputs.git_sha }}
+          format: table
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Gate pricing image
+        id: gate-pricing
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        continue-on-error: true
+        with:
+          image-ref: zavashop/pricing:${{ steps.image-tag.outputs.git_sha }}
+          format: table
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Gate orchestrator image
+        id: gate-orchestrator
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        continue-on-error: true
+        with:
+          image-ref: zavashop/orchestrator:${{ steps.image-tag.outputs.git_sha }}
+          format: table
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Summarize image vulnerability findings
+        id: image-summary
+        if: always()
+        env:
+          BUILD_OUTCOME: ${{ steps.build-images.outcome }}
+          REPORT_BASE_OUTCOME: ${{ steps.report-base.outcome }}
+          REPORT_INVENTORY_MCP_OUTCOME: ${{ steps.report-inventory-mcp.outcome }}
+          REPORT_SUPPLIER_MCP_OUTCOME: ${{ steps.report-supplier-mcp.outcome }}
+          REPORT_SHIPPING_MCP_OUTCOME: ${{ steps.report-shipping-mcp.outcome }}
+          REPORT_PRICING_MCP_OUTCOME: ${{ steps.report-pricing-mcp.outcome }}
+          REPORT_INVENTORY_OUTCOME: ${{ steps.report-inventory.outcome }}
+          REPORT_SUPPLIER_OUTCOME: ${{ steps.report-supplier.outcome }}
+          REPORT_LOGISTICS_OUTCOME: ${{ steps.report-logistics.outcome }}
+          REPORT_PRICING_OUTCOME: ${{ steps.report-pricing.outcome }}
+          REPORT_ORCHESTRATOR_OUTCOME: ${{ steps.report-orchestrator.outcome }}
+          GATE_BASE_OUTCOME: ${{ steps.gate-base.outcome }}
+          GATE_INVENTORY_MCP_OUTCOME: ${{ steps.gate-inventory-mcp.outcome }}
+          GATE_SUPPLIER_MCP_OUTCOME: ${{ steps.gate-supplier-mcp.outcome }}
+          GATE_SHIPPING_MCP_OUTCOME: ${{ steps.gate-shipping-mcp.outcome }}
+          GATE_PRICING_MCP_OUTCOME: ${{ steps.gate-pricing-mcp.outcome }}
+          GATE_INVENTORY_OUTCOME: ${{ steps.gate-inventory.outcome }}
+          GATE_SUPPLIER_OUTCOME: ${{ steps.gate-supplier.outcome }}
+          GATE_LOGISTICS_OUTCOME: ${{ steps.gate-logistics.outcome }}
+          GATE_PRICING_OUTCOME: ${{ steps.gate-pricing.outcome }}
+          GATE_ORCHESTRATOR_OUTCOME: ${{ steps.gate-orchestrator.outcome }}
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          import os
+          from pathlib import Path
+
+          images = {
+              "base": ("zavashop-base", Path("image-security-reports/base.json")),
+              "inventory-mcp": ("zavashop/inventory-mcp", Path("image-security-reports/inventory-mcp.json")),
+              "supplier-mcp": ("zavashop/supplier-mcp", Path("image-security-reports/supplier-mcp.json")),
+              "shipping-mcp": ("zavashop/shipping-mcp", Path("image-security-reports/shipping-mcp.json")),
+              "pricing-mcp": ("zavashop/pricing-mcp", Path("image-security-reports/pricing-mcp.json")),
+              "inventory": ("zavashop/inventory", Path("image-security-reports/inventory.json")),
+              "supplier": ("zavashop/supplier", Path("image-security-reports/supplier.json")),
+              "logistics": ("zavashop/logistics", Path("image-security-reports/logistics.json")),
+              "pricing": ("zavashop/pricing", Path("image-security-reports/pricing.json")),
+              "orchestrator": ("zavashop/orchestrator", Path("image-security-reports/orchestrator.json")),
+          }
+          report_status = {
+              "base": os.environ.get("REPORT_BASE_OUTCOME", "skipped"),
+              "inventory-mcp": os.environ.get("REPORT_INVENTORY_MCP_OUTCOME", "skipped"),
+              "supplier-mcp": os.environ.get("REPORT_SUPPLIER_MCP_OUTCOME", "skipped"),
+              "shipping-mcp": os.environ.get("REPORT_SHIPPING_MCP_OUTCOME", "skipped"),
+              "pricing-mcp": os.environ.get("REPORT_PRICING_MCP_OUTCOME", "skipped"),
+              "inventory": os.environ.get("REPORT_INVENTORY_OUTCOME", "skipped"),
+              "supplier": os.environ.get("REPORT_SUPPLIER_OUTCOME", "skipped"),
+              "logistics": os.environ.get("REPORT_LOGISTICS_OUTCOME", "skipped"),
+              "pricing": os.environ.get("REPORT_PRICING_OUTCOME", "skipped"),
+              "orchestrator": os.environ.get("REPORT_ORCHESTRATOR_OUTCOME", "skipped"),
+          }
+          gate_status = {
+              "base": os.environ.get("GATE_BASE_OUTCOME", "skipped"),
+              "inventory-mcp": os.environ.get("GATE_INVENTORY_MCP_OUTCOME", "skipped"),
+              "supplier-mcp": os.environ.get("GATE_SUPPLIER_MCP_OUTCOME", "skipped"),
+              "shipping-mcp": os.environ.get("GATE_SHIPPING_MCP_OUTCOME", "skipped"),
+              "pricing-mcp": os.environ.get("GATE_PRICING_MCP_OUTCOME", "skipped"),
+              "inventory": os.environ.get("GATE_INVENTORY_OUTCOME", "skipped"),
+              "supplier": os.environ.get("GATE_SUPPLIER_OUTCOME", "skipped"),
+              "logistics": os.environ.get("GATE_LOGISTICS_OUTCOME", "skipped"),
+              "pricing": os.environ.get("GATE_PRICING_OUTCOME", "skipped"),
+              "orchestrator": os.environ.get("GATE_ORCHESTRATOR_OUTCOME", "skipped"),
+          }
+
+          print("## Image vulnerability summary")
+          print()
+          print("Counts are computed from complete, unfiltered Trivy JSON reports.")
+          print("Unfixed OS distribution findings remain visible and are accepted as pending educational-lab risks; their HIGH/CRITICAL counts are computed per image below and they do not block this gate.")
+          print()
+          print("| Image | Report | HIGH | CRITICAL | Total HIGH/CRITICAL | Fixable blocking | Unfixed OS H/C | Gate |")
+          print("|---|---:|---:|---:|---:|---:|---:|---:|")
+          failed = os.environ.get("BUILD_OUTCOME") != "success"
+          for key, (image, report_path) in images.items():
+              counts = {"HIGH": 0, "CRITICAL": 0}
+              fixable = 0
+              unfixed_os = 0
+              status = report_status[key]
+              if report_path.is_file():
+                  report = json.loads(report_path.read_text(encoding="utf-8"))
+                  for result in report.get("Results") or []:
+                      for vulnerability in result.get("Vulnerabilities") or []:
+                          severity = vulnerability.get("Severity")
+                          if severity in counts:
+                              counts[severity] += 1
+                              if vulnerability.get("FixedVersion"):
+                                  fixable += 1
+                              elif result.get("Class") == "os-pkgs":
+                                  unfixed_os += 1
+              else:
+                  status = "missing" if status == "success" else status
+              total = counts["HIGH"] + counts["CRITICAL"]
+              gate = gate_status[key]
+              print(f"| `{image}` | {status} | {counts['HIGH']} | {counts['CRITICAL']} | {total} | {fixable} | {unfixed_os} | {gate} |")
+              if status != "success" or gate != "success":
+                  failed = True
+          print()
+          print("A green gate means no fixable HIGH/CRITICAL findings; it does not mean images are vulnerability-free.")
+          print("The blocking Trivy scans use `ignore-unfixed` and exit code 1. Build, report-scan, and gate-scan errors fail this job.")
+          if failed:
+              raise SystemExit("Image build, report generation, or fixable HIGH/CRITICAL gate failed.")
+          PY
+
+      - name: Upload complete vulnerability reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-security-reports-${{ steps.image-tag.outputs.git_sha }}
+          path: image-security-reports/*.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  evals:
+    name: Labeled pull request evals
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(github.event.pull_request.labels.*.name, 'run-evals')
+    needs: [check, image-security]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Sync dependencies
+        run: uv sync --frozen --all-groups
+
+      - name: Set image tag
+        id: image-tag
+        run: echo "git_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Build base and service images
+        env:
+          GIT_SHA: ${{ steps.image-tag.outputs.git_sha }}
+        run: |
+          set -euo pipefail
+          GITHUB_TOKEN=build-only-placeholder GIT_SHA="$GIT_SHA" \
+            docker compose --profile build build zavashop-base
+          GITHUB_TOKEN=build-only-placeholder GIT_SHA="$GIT_SHA" \
+            docker compose build \
+              inventory-mcp supplier-mcp shipping-mcp pricing-mcp \
+              inventory supplier logistics pricing orchestrator
+
+      - name: Start fleet and run golden evals
+        env:
+          GIT_SHA: ${{ steps.image-tag.outputs.git_sha }}
+          GITHUB_TOKEN: ${{ secrets.COPILOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$GITHUB_TOKEN" ]]; then
+            echo 'COPILOT_TOKEN is required for labeled evals.' >&2
+            exit 1
+          fi
+
+          for service in \
+            inventory-mcp supplier-mcp shipping-mcp pricing-mcp \
+            inventory supplier logistics pricing orchestrator; do
+            docker compose up --detach --no-deps "$service"
+          done
+
+          services=(
+            inventory-mcp supplier-mcp shipping-mcp pricing-mcp
+            inventory supplier logistics pricing orchestrator
+          )
+          deadline=$((SECONDS + 600))
+          all_healthy=false
+          while (( SECONDS < deadline )); do
+            not_ready=()
+            for service in "${services[@]}"; do
+              container_id=$(docker compose ps --quiet "$service")
+              if [[ -z "$container_id" ]]; then
+                not_ready+=("$service:missing")
+                continue
+              fi
+
+              health=$(docker inspect \
+                --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' \
+                "$container_id" 2>/dev/null || true)
+              if [[ "$health" != healthy ]]; then
+                not_ready+=("$service:${health:-unavailable}")
+              fi
+            done
+
+            if (( ${#not_ready[@]} == 0 )); then
+              all_healthy=true
+              break
+            fi
+            printf 'Waiting for healthy services: %s\n' "${not_ready[*]}"
+            remaining=$((deadline - SECONDS))
+            sleep_for=5
+            if (( remaining < sleep_for )); then
+              sleep_for=$remaining
+            fi
+            if (( sleep_for > 0 )); then
+              sleep "$sleep_for"
+            fi
+          done
+
+          if [[ "$all_healthy" != true ]]; then
+            echo 'The Compose fleet did not become healthy within 600 seconds.' >&2
+            exit 1
+          fi
+
+          ZAVA_ENDPOINT=http://localhost:8000 uv run --frozen poe evals 2>&1 | tee eval-output.log
+
+      - name: Capture Compose diagnostics and clean up
+        if: always()
+        env:
+          GIT_SHA: ${{ steps.image-tag.outputs.git_sha }}
+          GITHUB_TOKEN: ${{ secrets.COPILOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          docker compose ps --all > compose-ps.log 2>&1 || true
+          docker compose logs --no-color --timestamps 2>&1 | python -c '
+          import os
+          import sys
+
+          token = os.environ.get("GITHUB_TOKEN", "")
+          for line in sys.stdin:
+              sys.stdout.write(line.replace(token, "[REDACTED]") if token else line)
+          ' > compose-logs.log || true
+          docker compose down --volumes --remove-orphans
+
+      - name: Upload eval output and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab-04-evals-${{ steps.image-tag.outputs.git_sha }}
+          path: |
+            eval-output.log
+            compose-ps.log
+            compose-logs.log
+          if-no-files-found: warn
+          retention-days: 7

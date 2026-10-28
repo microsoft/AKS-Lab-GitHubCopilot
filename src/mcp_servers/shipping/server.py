@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import structlog
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+
+from src.shared.keyvault import hydrate_from_keyvault
 
 from .models import ShipmentQuote, ShipmentQuoteRequest
 from .store import quote_shipment as quote_shipment_from_store
@@ -48,4 +52,5 @@ async def quote_shipment(request: ShipmentQuoteRequest) -> ShipmentQuote:
 
 
 if __name__ == "__main__":
+    asyncio.run(hydrate_from_keyvault())
     mcp.run(transport="streamable-http")

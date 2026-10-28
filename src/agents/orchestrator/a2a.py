@@ -26,19 +26,22 @@ class SpecialistOutputs(BaseModel):
 
 
 @dataclass(frozen=True)
-class SpecialistClient:
-    """HTTP client for invoking ZavaShop specialist agents."""
+class A2AClient:
+    """HTTP client for invoking ZavaShop specialist agents over A2A."""
 
     settings: Settings
 
     async def invoke(self, *, name: str, url: str, goal: str, run_id: str | None = None) -> str:
         request = InvokeRequest(run_id=run_id or uuid4().hex, goal=goal, context={"caller": "orchestrator"})
-        timeout = httpx.Timeout(self.settings.copilot_timeout_seconds)
+        timeout = httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0)
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(url, json=request.model_dump())
             response.raise_for_status()
         envelope = InvokeResponse.model_validate(response.json())
         return envelope.output
+
+
+SpecialistClient = A2AClient
 
 
 class SpecialistInvoker(Protocol):

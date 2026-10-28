@@ -248,3 +248,11 @@ Next: [Lab 03 — Orchestration & Configuration](../lab-03-orchestration/README.
 | LLM replies “all four specialists returned **Permission denied** …” | `on_permission_request` not set on `GitHubCopilotOptions`. | Add `_approve_all` handler in **every** agent including the orchestrator. |
 | Tool call raises `'dict' object has no attribute 'goal'` | Function-tool parameter is a Pydantic model; SDK passes a raw dict. | Make the tool take flat scalars: `async def ask_inventory(goal: str)`. |
 | `httpx.ReadTimeout` from orchestrator after ≈30 s | `A2AClient` httpx default of 30 s is too tight for a specialist LLM run. | Use `httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0)`. |
+
+
+## Lab 02 — Evidence
+### Terminal verification
+![Lab 02 terminal verification](../../evidence/lab-02/terminal.png)
+
+### Azure Portal
+![Lab 02 Azure resources](../../evidence/lab-02/portal.png)

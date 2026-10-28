@@ -6,23 +6,32 @@ requires-python = ">=3.11"
 dependencies = [
     "agent-framework-core>=1.8.1",
     "agent-framework-github-copilot>=1.0.0rc1",
+    "anyio>=4.14.2",
+    "azure-identity>=1.27.0",
+    "azure-keyvault-secrets>=4.11.3",
+    "certifi>=2026.10.19",
+    "cryptography>=50.0.0",
     "fastapi",
     "httpx",
-    "mcp",
-    "opentelemetry-api",
+    "mcp>=1.30.0,<2",
+    "opentelemetry-api>=1.45.1",
     "opentelemetry-sdk",
     "pydantic>=2",
     "pydantic-settings",
+    "pyjwt>=2.15.0",
     "structlog",
     "uvicorn",
 ]
 
 [dependency-groups]
 dev = [
+    "bandit>=1.9.4",
+    "pip-audit>=2.10.1",
     "poethepoet",
     "pyright",
     "pytest",
     "pytest-asyncio",
+    "pytest-cov>=7.1.0",
     "ruff",
 ]
 
@@ -34,6 +43,11 @@ target-version = "py311"
 select = ["E", "F", "I", "B", "UP", "N", "ASYNC", "PL", "RUF"]
 ignore = ["PLR0913"]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["ANN401"]
+# Preserve the diagnostic script's intentional lazy import when agent-framework is unavailable.
+".github/scripts/diagnose_af.py" = ["PLC0415"]
+
 [tool.pyright]
 pythonVersion = "3.11"
 typeCheckingMode = "strict"
@@ -44,4 +58,9 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.poe.tasks]
-check = { shell = "ruff check src tests && ruff format --check src tests && pyright src tests && pytest" }
+check = { shell = "ruff check . && ruff format --check . && pyright && pytest -q --cov=src/agents --cov-fail-under=80" }
+audit = { shell = "bandit -q -c pyproject.toml -r src && pip-audit --strict" }
+evals = { cmd = "python -m tests.evals.run_evals" }
+
+[tool.bandit]
+skips = ["B104", "B105"]

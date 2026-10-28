@@ -1,0 +1,11 @@
+PASS S1-stockout-zs1042-store101 latency=32.85s
+  note=expected specialists: inventory,supplier,logistics,pricing
+PASS S2-demand-spike-zs1042 latency=33.90s
+  note=expected specialists: inventory,supplier,logistics,pricing
+PASS S3-supplier-delay-zs1042 latency=45.46s
+  note=expected specialists: inventory,supplier,logistics
+PASS S4-price-war-zs1042 latency=34.97s
+  note=expected specialists: inventory,pricing,supplier
+PASS S5-seasonal-promotion-zs1042 latency=45.74s
+  note=expected specialists: inventory,pricing,supplier,logistics
+failures=0 total=5

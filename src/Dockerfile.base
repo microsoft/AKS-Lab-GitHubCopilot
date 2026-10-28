@@ -1,37 +1,37 @@
-FROM python:3.11-slim AS builder
+FROM python:3.13-slim AS builder
 
-ENV UV_SYSTEM_PYTHON=1
+WORKDIR /app
 RUN python -m pip install --no-cache-dir uv
-RUN uv pip install --system \
-    agent-framework-core \
-    agent-framework-github-copilot \
-    fastapi \
-    httpx \
-    mcp \
-    opentelemetry-api \
-    opentelemetry-sdk \
-    pydantic \
-    pydantic-settings \
-    structlog \
-    uvicorn
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
 
-FROM python:3.11-slim AS runtime
+FROM python:3.13-slim AS runtime
 
 LABEL org.opencontainers.image.source="https://github.com/kinfey/AKS-Lab-GitHubCopilot"
 
-ENV HOME=/home/zava \
+# Installer tooling is used only in the builder; runtime dependencies are in the application venv.
+RUN rm -rf \
+    /usr/local/lib/python3.13/site-packages/pip \
+    /usr/local/lib/python3.13/site-packages/pip-*.dist-info \
+    /usr/local/lib/python3.13/ensurepip \
+    /usr/local/bin/pip \
+    /usr/local/bin/pip3 \
+    /usr/local/bin/pip3.13
+
+ENV PATH="/app/.venv/bin:/usr/local/bin:${PATH}" \
+    HOME=/home/zava \
     XDG_CACHE_HOME=/home/zava/.cache \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-RUN useradd -m -u 10001 zava \
+RUN groupadd --gid 10001 zava \
+    && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/zava zava \
     && mkdir -p /home/zava/.cache /app \
     && chown -R 10001:10001 /home/zava /app
 WORKDIR /app
 
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=builder /usr/local/bin/uvicorn /usr/local/bin/uvicorn
-COPY src /app/src
+COPY --from=builder --chown=10001:10001 /app/.venv /app/.venv
+COPY --chown=10001:10001 src /app/src
 
-USER zava
+USER 10001:10001
 EXPOSE 8000

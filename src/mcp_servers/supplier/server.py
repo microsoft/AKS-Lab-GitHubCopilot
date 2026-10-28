@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import structlog
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+
+from src.shared.keyvault import hydrate_from_keyvault
 
 from .models import PurchaseOrderDraft, PurchaseOrderRequest, SupplierList, SupplierQuery
 from .store import create_purchase_order, find_suppliers
@@ -63,4 +67,5 @@ async def draft_po(request: PurchaseOrderRequest) -> PurchaseOrderDraft:
 
 
 if __name__ == "__main__":
+    asyncio.run(hydrate_from_keyvault())
     mcp.run(transport="streamable-http")
